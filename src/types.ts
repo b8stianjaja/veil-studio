@@ -3,6 +3,7 @@ export type WorkspaceMode = 'MODELING' | 'PAINTING';
 export type ToolType = 
   // Painting Suite
   | 'BRUSH' | 'ERASER' | 'PAN' | 'EYEDROPPER' | 'BUCKET' | 'SHAPE_LINE' | 'SHAPE_RECT' | 'SHAPE_CIRCLE' | 'SELECT_2D'
+  | 'MAGIC_WAND' | 'SMUDGE' | 'BLUR'
   // Modeling Suite
   | 'ORBIT' | 'SELECT' | 'ROTATE' | 'SCALE' | 'TRANSFORM_GIZMO' | 'CREATE_PRIMITIVE';
 
@@ -71,6 +72,7 @@ export interface VeilProject {
     width: number;
     height: number;
     backgroundColor?: string;
+    isSpritesheetMode?: boolean;
   };
   scene: {
     nodes: SceneNode[];

@@ -1,10 +1,17 @@
 import { StudioEngine } from '../core/StudioEngine';
 import { WorkspaceMode, ToolType } from '../types';
 
-/**
- * Intercepts raw browser pointer events before they reach the renderer.
- * Routes events to 3D controller or Canvas engine based on workspace mode.
- */
+const INTERACTIVE_TOOLS: ToolType[] = [
+  'BRUSH', 'ERASER', 'SMUDGE', 'BLUR', 
+  'BUCKET', 'MAGIC_WAND', 
+  'SHAPE_RECT', 'SHAPE_LINE', 'SHAPE_CIRCLE'
+];
+
+const DRAG_TOOLS: ToolType[] = [
+  'BRUSH', 'ERASER', 'SMUDGE', 'BLUR',
+  'SHAPE_RECT', 'SHAPE_LINE', 'SHAPE_CIRCLE'
+];
+
 export class InputInterceptor {
   
   static handlePointerDown(
@@ -14,10 +21,9 @@ export class InputInterceptor {
     configWidth: number,
     configHeight: number
   ) {
-    if (workspace === 'PAINTING' && (tool === 'BRUSH' || tool === 'ERASER')) {
-      if (e.button !== 0) return; // Only draw on primary click
+    if (workspace === 'PAINTING' && INTERACTIVE_TOOLS.includes(tool)) {
+      if (e.button !== 0) return; // Only interact on primary click
       e.stopPropagation();
-      e.currentTarget.setPointerCapture(e.pointerId);
       
       const engine = StudioEngine.getInstance();
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -26,7 +32,13 @@ export class InputInterceptor {
       
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
-      engine.startStroke(x, y);
+      
+      if (tool === 'BUCKET' || tool === 'MAGIC_WAND') {
+        engine.floodFill(x, y);
+      } else {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        engine.startStroke(x, y);
+      }
     }
   }
 
@@ -37,7 +49,7 @@ export class InputInterceptor {
     configWidth: number,
     configHeight: number
   ) {
-    if (workspace === 'PAINTING' && (tool === 'BRUSH' || tool === 'ERASER')) {
+    if (workspace === 'PAINTING' && DRAG_TOOLS.includes(tool)) {
       if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
       
       e.stopPropagation();
@@ -57,7 +69,7 @@ export class InputInterceptor {
     workspace: WorkspaceMode, 
     tool: ToolType
   ) {
-    if (workspace === 'PAINTING' && (tool === 'BRUSH' || tool === 'ERASER')) {
+    if (workspace === 'PAINTING' && DRAG_TOOLS.includes(tool)) {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
       }

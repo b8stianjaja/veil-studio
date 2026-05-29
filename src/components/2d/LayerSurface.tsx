@@ -61,14 +61,15 @@ const HelperGridOverlay: React.FC = () => {
   );
 };
 
-  const AnimationOverlay: React.FC = () => {
+const AnimationOverlay: React.FC = () => {
   const { rows, columns, activeFrame, onionSkinFrames, onionSkinOpacity, isPlaying } = useAnimationStore();
   const workspace = useCanvasStore((state) => state.workspace);
+  const isSpritesheetMode = useCanvasStore((state) => state.isSpritesheetMode);
   const { width, height } = useCanvasStore((state) => state.projectConfig);
   const tick = useCanvasStore((state) => state.layerUpdateTick);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  const showOnion = workspace === 'PAINTING' && !isPlaying && onionSkinFrames > 0;
+  const showOnion = workspace === 'PAINTING' && isSpritesheetMode && !isPlaying && onionSkinFrames > 0;
 
   const frameW = width / columns;
   const frameH = height / rows;
@@ -128,7 +129,7 @@ const HelperGridOverlay: React.FC = () => {
     renderOnionSkin();
   }, [showOnion, activeFrame, onionSkinFrames, onionSkinOpacity, width, height, columns, rows, numFrames, currX, currY, frameW, frameH, tick]);
 
-  if (workspace !== 'PAINTING') return null;
+  if (workspace !== 'PAINTING' || !isSpritesheetMode) return null;
 
   return (
     <div className="absolute inset-0 pointer-events-none z-[9999]">
@@ -181,7 +182,7 @@ const HelperGridOverlay: React.FC = () => {
       )}
     </div>
   );
-  };
+};
 
 export const LayerSurface: React.FC = () => {
   const layers = useCanvasStore((state) => state.layers);

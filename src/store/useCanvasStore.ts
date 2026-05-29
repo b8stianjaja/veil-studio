@@ -8,9 +8,14 @@ interface CanvasState {
   tool: ToolType;
   layers: LayerConfig[];
   activeLayerId: string | null;
+  
+  // Brush & Tool Settings
   brushSize: number;
   brushColor: string;
   brushOpacity: number;
+  brushHardness: number;
+  brushFlow: number;
+  
   globalOpacity: number;
   backgroundColor: string;
   layerUpdateTick: Record<string, number>;
@@ -29,11 +34,14 @@ interface CanvasState {
   setAutoSaveStatus: (status: 'saved' | 'saving' | 'dirty') => void;
   projectConfig: { width: number, height: number };
   projectConfigured: boolean;
+  isSpritesheetMode: boolean;
   zoom: number;
   pan: { x: number, y: number };
+  
   toggleTheme: () => void;
   setProjectConfigured: (configured: boolean) => void;
   setProjectConfig: (config: { width: number, height: number }) => void;
+  setIsSpritesheetMode: (mode: boolean) => void;
   setZoom: (zoom: number) => void;
   setPan: (pan: { x: number, y: number }) => void;
   setWorkspace: (mode: WorkspaceMode) => void;
@@ -43,12 +51,12 @@ interface CanvasState {
   updateLayer: (id: string, updates: Partial<LayerConfig>) => void;
   removeLayer: (id: string) => void;
   setActiveLayer: (id: string | null) => void;
-  setBrushSettings: (updates: { size?: number, color?: string, opacity?: number }) => void;
+  setBrushSettings: (updates: { size?: number, color?: string, opacity?: number, hardness?: number, flow?: number }) => void;
   setSymmetry: (axis: 'X' | 'Y', value: boolean) => void;
   setShowGrid: (show: boolean) => void;
   reorderLayers: (startIndex: number, endIndex: number) => void;
   setReferenceGrid: (updates: Partial<CanvasState['referenceGrid']>) => void;
-  restoreState: (layers: LayerConfig[], backgroundColor?: string) => void;
+  restoreState: (layers: LayerConfig[], backgroundColor?: string, isSpritesheet?: boolean) => void;
   setBackgroundColor: (color: string) => void;
   markLayerUpdated: (id: string) => void;
   triggerGlobalUpdate: () => void;
@@ -67,6 +75,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   brushSize: 5,
   brushColor: '#d0d0d0',
   brushOpacity: 1,
+  brushHardness: 100,
+  brushFlow: 100,
   globalOpacity: 1,
   backgroundColor: '#0a0a0a',
   layerUpdateTick: { [initialLayerId]: Date.now() },
@@ -84,6 +94,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   autoSaveStatus: 'saved',
   projectConfigured: false,
   projectConfig: { width: 1024, height: 1024 },
+  isSpritesheetMode: false,
   zoom: 1,
   pan: { x: 0, y: 0 },
 
@@ -101,6 +112,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   setProjectConfigured: (configured) => set({ projectConfigured: configured }),
   setProjectConfig: (config) => set((state) => ({ projectConfig: { ...state.projectConfig, ...config } })),
+  setIsSpritesheetMode: (mode) => set({ isSpritesheetMode: mode }),
   setZoom: (zoom) => set({ zoom }),
   setPan: (pan) => set({ pan }),
   
@@ -117,7 +129,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
     const parentId = activeLayer ? (activeLayer.type === 'FOLDER' ? activeLayer.id : activeLayer.parentId) : null;
     
-    // Polish: Safely calculate the next highest order to prevent collisions
     const nextOrder = state.layers.length > 0 
       ? Math.max(...state.layers.map(l => l.order)) + 1 
       : 0;
@@ -187,14 +198,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     
     if (newLayers.length === 0) return state; 
     
-    // Polish: Fallback to the structurally highest order layer instead of a random array position
     let newActiveId = state.activeLayerId;
     if (idsToRemove.includes(state.activeLayerId || '')) {
       const sortedLayers = [...newLayers].sort((a, b) => b.order - a.order);
       newActiveId = sortedLayers[0]?.id || null;
     }
 
-    // Polish: Prevent memory leaks by cleaning up update ticks for deleted layers
     const newUpdateTick = { ...state.layerUpdateTick };
     idsToRemove.forEach(deletedId => delete newUpdateTick[deletedId]);
 
@@ -211,20 +220,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setBrushSettings: (updates) => set((state) => ({
     brushSize: updates.size ?? state.brushSize,
     brushColor: updates.color ?? state.brushColor,
-    brushOpacity: updates.opacity ?? state.brushOpacity
+    brushOpacity: updates.opacity ?? state.brushOpacity,
+    brushHardness: updates.hardness ?? state.brushHardness,
+    brushFlow: updates.flow ?? state.brushFlow
   })),
 
   setSymmetry: (axis, value) => set(state => axis === 'X' ? { symmetryX: value } : { symmetryY: value }),
   setShowGrid: (show) => set({ showGrid: show }),
 
   reorderLayers: (startIndex, endIndex) => set((state) => {
-    // Polish: Sync with UI sort order BEFORE applying indices so we drag the correct target
     const sorted = [...state.layers].sort((a, b) => b.order - a.order);
     const [removed] = sorted.splice(startIndex, 1);
     sorted.splice(endIndex, 0, removed);
     
     return {
-      // Reassign explicit orders based on new visual arrangement
       layers: sorted.map((layer, index) => ({ 
         ...layer, 
         order: sorted.length - 1 - index 
@@ -237,12 +246,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     referenceGrid: { ...state.referenceGrid, ...updates }
   })),
 
-  restoreState: (layers, backgroundColor) => set(state => ({ 
+  restoreState: (layers, backgroundColor, isSpritesheet) => set(state => ({ 
     layers, 
     activeLayerId: layers.length > 0 ? [...layers].sort((a,b) => b.order - a.order)[0].id : null,
     workspace: 'PAINTING',
     tool: 'BRUSH',
     backgroundColor: backgroundColor || '#0a0a0a',
+    isSpritesheetMode: isSpritesheet ?? false,
     globalUpdateTick: state.globalUpdateTick + 1
   })),
 

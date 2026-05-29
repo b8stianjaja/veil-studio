@@ -17,7 +17,6 @@ export class AutoSaveService {
     this.initialized = true;
 
     useCanvasStore.subscribe((state, prevState) => {
-      // Don't save on view transformations, just content/structure changes
       if (
         state.layers !== prevState.layers || 
         state.layerUpdateTick !== prevState.layerUpdateTick ||
@@ -51,7 +50,6 @@ export class AutoSaveService {
     
     useCanvasStore.getState().setAutoSaveStatus('dirty');
 
-    // Debounce saves by 5 seconds
     this.saveTimeout = setTimeout(() => {
       this.performSave();
     }, 5000);
@@ -73,7 +71,7 @@ export class AutoSaveService {
         const bufferCanvas = engine.getFrameBuffer(layer.id);
         let buffer = '';
         if (bufferCanvas) {
-          buffer = bufferCanvas.toDataURL('image/png'); // Can optimize but this is okay in background
+          buffer = bufferCanvas.toDataURL('image/png'); 
         }
         return {
           ...layer,
@@ -89,11 +87,13 @@ export class AutoSaveService {
         canvas: {
           width: canvasState.projectConfig.width,
           height: canvasState.projectConfig.height,
-          backgroundColor: canvasState.backgroundColor
+          backgroundColor: canvasState.backgroundColor,
+          isSpritesheetMode: canvasState.isSpritesheetMode
         },
         scene: {
           nodes: sceneState.nodes,
-          lights: sceneState.lights
+          lights: sceneState.lights,
+          camera: sceneState.camera
         },
         animation: {
           rows: animationState.rows,
@@ -107,10 +107,8 @@ export class AutoSaveService {
       console.log("Auto-save complete.");
       useCanvasStore.getState().setAutoSaveStatus('saved');
       
-      // We could trigger a toast here if we had a global toast store
     } catch (e) {
       console.warn("Failed to auto-save project:", e);
-      // Wait a little before making it dirty again to prevent hard locks
       useCanvasStore.getState().setAutoSaveStatus('dirty');
     } finally {
       this.isGenerating = false;
@@ -133,7 +131,12 @@ export class AutoSaveService {
       
       console.log("Found auto-save, restoring...");
       
-      useSceneStore.getState().restoreState(project.scene.nodes, project.scene.lights);
+      const sceneState = useSceneStore.getState();
+      sceneState.restoreState(project.scene.nodes, project.scene.lights);
+      
+      if (project.scene.camera && sceneState.updateCamera) {
+         sceneState.updateCamera(project.scene.camera);
+      }
       
       if (project.animation) {
         useAnimationStore.getState().restoreState(
@@ -147,7 +150,12 @@ export class AutoSaveService {
         useCanvasStore.getState().setProjectConfig({ width: project.canvas.width, height: project.canvas.height });
         StudioEngine.getInstance().resizeAllLayers(project.canvas.width, project.canvas.height);
       }
-      useCanvasStore.getState().restoreState(project.layers, project.canvas?.backgroundColor);
+      
+      useCanvasStore.getState().restoreState(
+        project.layers, 
+        project.canvas?.backgroundColor,
+        project.canvas?.isSpritesheetMode
+      );
       
       return true;
     } catch (e) {

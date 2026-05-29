@@ -14,6 +14,8 @@ export const InspectorPanel: React.FC = () => {
   const { width, height } = useCanvasStore(state => state.projectConfig);
   const setProjectConfig = useCanvasStore(state => state.setProjectConfig);
   const setBackgroundColor = useCanvasStore(state => state.setBackgroundColor);
+  const isSpritesheetMode = useCanvasStore(state => state.isSpritesheetMode);
+  const setIsSpritesheetMode = useCanvasStore(state => state.setIsSpritesheetMode);
   const panelRef = React.useRef<HTMLDivElement>(null);
 
   useGSAP(() => {
@@ -78,6 +80,21 @@ export const InspectorPanel: React.FC = () => {
                  </div>
                </div>
             </div>
+            
+            {workspace === 'PAINTING' && (
+              <div className="mt-2 border-t border-border-subtle pt-3">
+                <div className="flex items-center justify-between">
+                   <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase">Spritesheet Mode</span>
+                   <button 
+                     onClick={() => setIsSpritesheetMode(!isSpritesheetMode)}
+                     className={`w-9 h-5 rounded-full relative transition-colors ${isSpritesheetMode ? 'bg-[#4488FF]' : 'bg-bg-input border border-border-strong'}`}
+                   >
+                     <div className={`absolute top-[1.5px] w-4 h-4 rounded-full bg-white transition-all duration-200 ${isSpritesheetMode ? 'left-[18px]' : 'left-[1.5px]'}`} />
+                   </button>
+                </div>
+              </div>
+            )}
+            
           </div>
         </Accordion>
         {workspace === 'MODELING' ? <ThreeDControls /> : <TwoDControls />}
@@ -86,6 +103,7 @@ export const InspectorPanel: React.FC = () => {
   );
 };
 
+// ... ThreeDControls unchanged ...
 const ThreeDControls = () => {
   const { 
     nodes, selectedNodeId, updateNode, addNode, removeNode, 
@@ -403,7 +421,7 @@ const ThreeDControls = () => {
 };
 
 const TwoDControls = () => {
-  const { layers, activeLayerId, setActiveLayer, addLayer, updateLayer, removeLayer, brushSize, brushColor, brushOpacity, setBrushSettings, reorderLayers, showGrid, setShowGrid, symmetryX, setSymmetry, symmetryY, referenceGrid, setReferenceGrid } = useCanvasStore();
+  const { layers, activeLayerId, setActiveLayer, addLayer, updateLayer, removeLayer, brushSize, brushColor, brushOpacity, brushHardness, brushFlow, setBrushSettings, reorderLayers, showGrid, setShowGrid, symmetryX, setSymmetry, symmetryY, referenceGrid, setReferenceGrid } = useCanvasStore();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useGSAP(() => {
@@ -526,6 +544,30 @@ const TwoDControls = () => {
             />
           </div>
           <div>
+            <div className="flex justify-between mb-1">
+              <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase">Hardness</span>
+              <span className="text-[10px] text-text-muted font-mono">{brushHardness}%</span>
+            </div>
+            <input 
+              type="range" 
+              min="0" max="100" 
+              value={brushHardness}
+              onChange={(e) => setBrushSettings({ hardness: parseInt(e.target.value) })}
+            />
+          </div>
+          <div>
+            <div className="flex justify-between mb-1">
+              <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase">Flow</span>
+              <span className="text-[10px] text-text-muted font-mono">{brushFlow}%</span>
+            </div>
+            <input 
+              type="range" 
+              min="1" max="100" 
+              value={brushFlow}
+              onChange={(e) => setBrushSettings({ flow: parseInt(e.target.value) })}
+            />
+          </div>
+          <div>
              <span className="text-[10px] text-text-muted mb-1 block">Color</span>
              <input 
                type="color" 
@@ -597,6 +639,7 @@ const TwoDControls = () => {
   );
 };
 
+// ... LayerThumbnail and LayerItemNode unchanged below ...
 const LayerThumbnail = ({ layerId }: { layerId: string }) => {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const tick = useCanvasStore(state => state.layerUpdateTick[layerId]);

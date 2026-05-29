@@ -12,7 +12,7 @@ import { ExportService } from '../../services/ExportService';
 import { 
   Pen, Move3d, MousePointer2, Eraser, Focus, Maximize, RotateCw, Hand, 
   PanelRight, ChevronDown, Download, Upload, Save, FilePlus, Sun, Moon,
-  Pipette, PaintBucket, Square, Lasso, Cuboid, BoxSelect 
+  Pipette, PaintBucket, Square, Lasso, Cuboid, BoxSelect, Wand2, Droplet, Blend
 } from 'lucide-react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -34,7 +34,7 @@ const BrushCursorOverlay: React.FC = () => {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  if (workspace !== 'PAINTING' || (tool !== 'BRUSH' && tool !== 'ERASER')) return null;
+  if (workspace !== 'PAINTING' || (tool !== 'BRUSH' && tool !== 'ERASER' && tool !== 'SMUDGE' && tool !== 'BLUR')) return null;
 
   const size = brushSize * zoom;
 
@@ -53,7 +53,7 @@ const BrushCursorOverlay: React.FC = () => {
 };
 
 export const WorkspaceLayout: React.FC = () => {
-  const { workspace, setWorkspace, tool, setTool, backgroundColor, autoSaveStatus, theme, toggleTheme } = useCanvasStore();
+  const { workspace, setWorkspace, tool, setTool, backgroundColor, autoSaveStatus, theme, toggleTheme, isSpritesheetMode } = useCanvasStore();
   const { triggerCameraReset } = useSceneStore();
   const interceptContainerRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -62,7 +62,6 @@ export const WorkspaceLayout: React.FC = () => {
   const [inspectorOpen, setInspectorOpen] = useState(window.innerWidth > 1024);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
 
-  // High-performance DOM Refs for transform tracking
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const pan = useCanvasStore((state) => state.pan);
   const zoom = useCanvasStore((state) => state.zoom);
@@ -165,6 +164,7 @@ export const WorkspaceLayout: React.FC = () => {
         if (key === 'g') state.setTool('BUCKET');
         if (key === 'u') state.setTool('SHAPE_RECT');
         if (key === 'm') state.setTool('SELECT_2D');
+        if (key === 'w') state.setTool('MAGIC_WAND');
         if (key === '[') state.setBrushSettings({ size: Math.max(1, state.brushSize - 2) });
         if (key === ']') state.setBrushSettings({ size: Math.min(100, state.brushSize + 2) });
       } else if (ws === 'MODELING') {
@@ -217,7 +217,6 @@ export const WorkspaceLayout: React.FC = () => {
     };
   }, []);
 
-  // DOM-Direct Wheel Handling
   useEffect(() => {
     const handleWheelNative = (e: WheelEvent) => {
       const state = useCanvasStore.getState();
@@ -255,7 +254,6 @@ export const WorkspaceLayout: React.FC = () => {
         }
       }
 
-      // Sync Zustand cleanly after the wheel interaction finishes
       clearTimeout((window as any).panTimer);
       (window as any).panTimer = setTimeout(() => {
         state.setPan({ x: localTransform.current.x, y: localTransform.current.y });
@@ -298,7 +296,6 @@ export const WorkspaceLayout: React.FC = () => {
       const dx = e.clientX - panStart.current.x;
       const dy = e.clientY - panStart.current.y;
       
-      // DOM-Direct Mutation for dragging
       localTransform.current.x = panStart.current.panX + dx;
       localTransform.current.y = panStart.current.panY + dy;
       
@@ -332,9 +329,8 @@ export const WorkspaceLayout: React.FC = () => {
   const getCursor = () => {
     if (tool === 'PAN') return isPanningActive ? 'grabbing' : 'grab';
     if (workspace === 'PAINTING') {
-      if (tool === 'BRUSH' || tool === 'ERASER') return 'none';
-      if (tool === 'EYEDROPPER') return 'crosshair';
-      if (tool === 'SELECT_2D') return 'crosshair';
+      if (['BRUSH', 'ERASER', 'SMUDGE', 'BLUR'].includes(tool)) return 'none';
+      if (tool === 'EYEDROPPER' || tool === 'SELECT_2D' || tool === 'MAGIC_WAND') return 'crosshair';
       return 'crosshair';
     }
     return 'default';
@@ -489,8 +485,14 @@ export const WorkspaceLayout: React.FC = () => {
                 
                 <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
                 
+                <ToolButton icon={<Blend size={18} />} id="SMUDGE" active={tool === 'SMUDGE'} onClick={() => setTool('SMUDGE')} tooltip="Smudge Tool" />
+                <ToolButton icon={<Droplet size={18} />} id="BLUR" active={tool === 'BLUR'} onClick={() => setTool('BLUR')} tooltip="Blur Tool" />
+
+                <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
+                
                 <ToolButton icon={<Square size={18} />} id="SHAPE_RECT" active={tool === 'SHAPE_RECT'} onClick={() => setTool('SHAPE_RECT')} tooltip="Rectangle Shape (U)" />
                 <ToolButton icon={<Lasso size={18} />} id="SELECT_2D" active={tool === 'SELECT_2D'} onClick={() => setTool('SELECT_2D')} tooltip="Lasso Select (M)" />
+                <ToolButton icon={<Wand2 size={18} />} id="MAGIC_WAND" active={tool === 'MAGIC_WAND'} onClick={() => setTool('MAGIC_WAND')} tooltip="Magic Wand (W)" />
 
                 <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
                 
@@ -522,7 +524,7 @@ export const WorkspaceLayout: React.FC = () => {
 
         <div className="flex-1 flex flex-col min-w-0 bg-bg-app relative">
           
-          <AnimationPreview />
+          {isSpritesheetMode && <AnimationPreview />}
 
           <div 
             ref={viewportRef}
@@ -566,7 +568,7 @@ export const WorkspaceLayout: React.FC = () => {
             </div>
           </div>
 
-          <AnimationToolbar />
+          {isSpritesheetMode && <AnimationToolbar />}
 
         </div>
 
