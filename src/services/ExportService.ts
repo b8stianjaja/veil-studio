@@ -14,7 +14,14 @@ export class ExportService {
         throw new Error("Invalid project file");
       }
       
-      useSceneStore.getState().restoreState(project.scene.nodes, project.scene.lights);
+      // Updated to restore the camera configuration alongside nodes and lights
+      // Passing undefined for environment to keep the user's current environment settings
+      useSceneStore.getState().restoreState(
+        project.scene.nodes, 
+        project.scene.lights,
+        undefined,
+        project.scene.camera
+      );
       
       if (project.animation) {
         useAnimationStore.getState().restoreState(
@@ -67,7 +74,9 @@ export class ExportService {
       },
       scene: {
         nodes: sceneState.nodes,
-        lights: sceneState.lights
+        lights: sceneState.lights,
+        // Added camera state serialization
+        camera: sceneState.camera
       },
       animation: {
         rows: animationState.rows,

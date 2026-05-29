@@ -1,8 +1,24 @@
+# Dependencies
 node_modules/
+
+# Frontend build output
 build/
 dist/
+
+# Tauri / Rust build output
+src-tauri/target/
+
+# Electron remnants (safe to delete these folders locally)
+dist-electron/
+release/
+
+# Testing & Logs
 coverage/
-.DS_Store
 *.log
+
+# Environment variables
 .env*
 !.env.example
+
+# OS generated files
+.DS_Store

@@ -14,7 +14,7 @@ interface CanvasState {
   globalOpacity: number;
   backgroundColor: string;
   layerUpdateTick: Record<string, number>;
-  globalUpdateTick: number; // Added to track structural changes
+  globalUpdateTick: number;
   symmetryX: boolean;
   symmetryY: boolean;
   showGrid: boolean;
@@ -42,7 +42,7 @@ interface CanvasState {
   addFolder: () => void;
   updateLayer: (id: string, updates: Partial<LayerConfig>) => void;
   removeLayer: (id: string) => void;
-  setActiveLayer: (id: string) => void;
+  setActiveLayer: (id: string | null) => void;
   setBrushSettings: (updates: { size?: number, color?: string, opacity?: number }) => void;
   setSymmetry: (axis: 'X' | 'Y', value: boolean) => void;
   setShowGrid: (show: boolean) => void;
@@ -82,11 +82,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     opacity: 0.5
   },
   autoSaveStatus: 'saved',
-  setAutoSaveStatus: (status) => set({ autoSaveStatus: status }),
   projectConfigured: false,
   projectConfig: { width: 1024, height: 1024 },
   zoom: 1,
   pan: { x: 0, y: 0 },
+
+  setAutoSaveStatus: (status) => set({ autoSaveStatus: status }),
+  
   toggleTheme: () => set(state => {
     const newTheme = state.theme === 'dark' ? 'light' : 'dark';
     if (newTheme === 'dark') {
@@ -96,43 +98,57 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }
     return { theme: newTheme };
   }),
+
   setProjectConfigured: (configured) => set({ projectConfigured: configured }),
   setProjectConfig: (config) => set((state) => ({ projectConfig: { ...state.projectConfig, ...config } })),
   setZoom: (zoom) => set({ zoom }),
   setPan: (pan) => set({ pan }),
+  
   setWorkspace: (mode) => set({ 
     workspace: mode, 
     tool: mode === 'MODELING' ? 'ORBIT' : 'BRUSH' 
   }),
+  
   setTool: (tool) => set({ tool }),
   
   triggerGlobalUpdate: () => set(state => ({ globalUpdateTick: state.globalUpdateTick + 1 })),
 
   addLayer: () => set((state) => {
-    const parentId = state.activeLayerId ? 
-      (state.layers.find(l => l.id === state.activeLayerId)?.type === 'FOLDER' ? state.activeLayerId : state.layers.find(l => l.id === state.activeLayerId)?.parentId) 
-      : null;
+    const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
+    const parentId = activeLayer ? (activeLayer.type === 'FOLDER' ? activeLayer.id : activeLayer.parentId) : null;
+    
+    // Polish: Safely calculate the next highest order to prevent collisions
+    const nextOrder = state.layers.length > 0 
+      ? Math.max(...state.layers.map(l => l.order)) + 1 
+      : 0;
+
     const newLayer: LayerConfig = {
       id: uuidv4(),
-      order: state.layers.length,
+      order: nextOrder,
       visible: true,
       opacity: 1,
-      name: `Layer ${state.layers.length + 1}`,
+      name: `Layer ${state.layers.filter(l => l.type !== 'FOLDER').length + 1}`,
       locked: false,
       blendMode: 'normal',
       type: 'LAYER',
-      parentId: parentId || null
+      parentId
     };
+    
     return { 
       layers: [...state.layers, newLayer],
       activeLayerId: newLayer.id,
       globalUpdateTick: state.globalUpdateTick + 1
     };
   }),
+
   addFolder: () => set((state) => {
+    const nextOrder = state.layers.length > 0 
+      ? Math.max(...state.layers.map(l => l.order)) + 1 
+      : 0;
+
     const newFolder: LayerConfig = {
       id: uuidv4(),
-      order: state.layers.length,
+      order: nextOrder,
       visible: true,
       opacity: 1,
       name: `Group ${state.layers.filter(l => l.type === 'FOLDER').length + 1}`,
@@ -141,18 +157,22 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       expanded: true,
       parentId: null
     };
+
     return {
       layers: [...state.layers, newFolder],
       activeLayerId: newFolder.id,
       globalUpdateTick: state.globalUpdateTick + 1
     };
   }),
+
   updateLayer: (id, updates) => set((state) => ({
     layers: state.layers.map(layer => layer.id === id ? { ...layer, ...updates } : layer),
     globalUpdateTick: state.globalUpdateTick + 1
   })),
+
   removeLayer: (id) => set((state) => {
     if (state.layers.length <= 1) return state;
+
     const findChildren = (parentId: string): string[] => {
        const children = state.layers.filter(l => l.parentId === parentId).map(l => l.id);
        let all = [...children];
@@ -161,51 +181,76 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
        });
        return all;
     };
+
     const idsToRemove = [id, ...findChildren(id)];
     const newLayers = state.layers.filter(l => !idsToRemove.includes(l.id));
+    
     if (newLayers.length === 0) return state; 
-    const newActiveId = idsToRemove.includes(state.activeLayerId || '')
-       ? newLayers[newLayers.length - 1].id
-       : state.activeLayerId;
+    
+    // Polish: Fallback to the structurally highest order layer instead of a random array position
+    let newActiveId = state.activeLayerId;
+    if (idsToRemove.includes(state.activeLayerId || '')) {
+      const sortedLayers = [...newLayers].sort((a, b) => b.order - a.order);
+      newActiveId = sortedLayers[0]?.id || null;
+    }
+
+    // Polish: Prevent memory leaks by cleaning up update ticks for deleted layers
+    const newUpdateTick = { ...state.layerUpdateTick };
+    idsToRemove.forEach(deletedId => delete newUpdateTick[deletedId]);
+
     return {
       layers: newLayers,
       activeLayerId: newActiveId,
+      layerUpdateTick: newUpdateTick,
       globalUpdateTick: state.globalUpdateTick + 1
     };
   }),
+
   setActiveLayer: (id) => set({ activeLayerId: id }),
+
   setBrushSettings: (updates) => set((state) => ({
-    ...state,
     brushSize: updates.size ?? state.brushSize,
     brushColor: updates.color ?? state.brushColor,
     brushOpacity: updates.opacity ?? state.brushOpacity
   })),
+
   setSymmetry: (axis, value) => set(state => axis === 'X' ? { symmetryX: value } : { symmetryY: value }),
   setShowGrid: (show) => set({ showGrid: show }),
+
   reorderLayers: (startIndex, endIndex) => set((state) => {
-    const result = Array.from(state.layers);
-    const [removed] = result.splice(startIndex, 1);
-    result.splice(endIndex, 0, removed);
+    // Polish: Sync with UI sort order BEFORE applying indices so we drag the correct target
+    const sorted = [...state.layers].sort((a, b) => b.order - a.order);
+    const [removed] = sorted.splice(startIndex, 1);
+    sorted.splice(endIndex, 0, removed);
+    
     return {
-      layers: result.map((layer, index) => ({ ...layer, order: index })),
+      // Reassign explicit orders based on new visual arrangement
+      layers: sorted.map((layer, index) => ({ 
+        ...layer, 
+        order: sorted.length - 1 - index 
+      })),
       globalUpdateTick: state.globalUpdateTick + 1
     };
   }),
+
   setReferenceGrid: (updates) => set((state) => ({
     referenceGrid: { ...state.referenceGrid, ...updates }
   })),
+
   restoreState: (layers, backgroundColor) => set(state => ({ 
     layers, 
-    activeLayerId: layers.length > 0 ? layers[0].id : null,
+    activeLayerId: layers.length > 0 ? [...layers].sort((a,b) => b.order - a.order)[0].id : null,
     workspace: 'PAINTING',
     tool: 'BRUSH',
     backgroundColor: backgroundColor || '#0a0a0a',
     globalUpdateTick: state.globalUpdateTick + 1
   })),
+
   setBackgroundColor: (color) => set(state => ({ 
     backgroundColor: color,
     globalUpdateTick: state.globalUpdateTick + 1
   })),
+
   markLayerUpdated: (id) => set((state) => ({
     layerUpdateTick: { ...state.layerUpdateTick, [id]: Date.now() }
   }))

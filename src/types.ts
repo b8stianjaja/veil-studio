@@ -21,6 +21,7 @@ export interface SceneNode {
   visible?: boolean;
   castShadow?: boolean;
   receiveShadow?: boolean;
+  locked?: boolean;
 }
 
 export interface LightingConfig {
@@ -36,6 +37,15 @@ export interface EnvironmentConfig {
   backgroundColor: string;
   axesVisible: boolean;
   snapToGrid?: boolean;
+}
+
+export interface CameraConfig {
+  type: 'PERSPECTIVE' | 'ORTHOGRAPHIC';
+  fov: number;
+  locked: boolean;
+  position: [number, number, number];
+  target: [number, number, number];
+  zoom: number;
 }
 
 export interface LayerConfig {
@@ -65,6 +75,7 @@ export interface VeilProject {
   scene: {
     nodes: SceneNode[];
     lights: LightingConfig;
+    camera: CameraConfig;
   };
   animation: {
     rows: number;

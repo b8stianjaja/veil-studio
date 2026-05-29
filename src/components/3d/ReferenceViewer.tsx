@@ -1,17 +1,15 @@
 import React, { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { TransformControls, OrbitControls, Edges } from '@react-three/drei';
+import { TransformControls, OrbitControls, Edges, PerspectiveCamera, OrthographicCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import { useSceneStore } from '../../store/useSceneStore';
 import { useCanvasStore } from '../../store/useCanvasStore';
 import { StudioEngine } from '../../core/StudioEngine';
 import { SceneNode } from '../../types';
 
-// Global variables outside the component tree to guarantee survival across React renders
 let globalDragEnd = 0;
 let globalIsDragging = false;
 
-// Bridge to connect R3F context with our vanilla StudioEngine
 const EngineBridge = () => {
   const { scene, camera } = useThree();
   useEffect(() => {
@@ -20,41 +18,92 @@ const EngineBridge = () => {
   return null;
 };
 
-const OrbitAndCameraHandler: React.FC = () => {
-  const { camera } = useThree();
-  const resetTick = useSceneStore(state => state.cameraResetTick);
+// Replaces the old static handler with a robust dynamic Camera Rig
+const CameraRig: React.FC = () => {
+  const { camera: cameraState, cameraResetTick, cameraSaveTick, updateCamera } = useSceneStore();
   const { workspace, tool } = useCanvasStore();
   const controlsRef = useRef<any>(null);
+  const { camera } = useThree();
 
+  // 1. Initial configuration & Resets based on stored coordinates
   useEffect(() => {
-    if (resetTick > 0) {
-      if (controlsRef.current) {
-        controlsRef.current.reset();
-      }
-      camera.position.set(5, 5, 5);
-      camera.lookAt(0, 0, 0);
+    if (cameraResetTick >= 0 && !cameraState.locked) {
+      camera.position.set(...cameraState.position);
       
+      if (cameraState.type === 'ORTHOGRAPHIC') {
+         (camera as THREE.OrthographicCamera).zoom = cameraState.zoom;
+      }
+      
+      camera.lookAt(...cameraState.target);
+      camera.updateProjectionMatrix();
+
       if (controlsRef.current) {
-        controlsRef.current.target.set(0, 0, 0);
+        controlsRef.current.target.set(...cameraState.target);
         controlsRef.current.update();
       }
     }
-  }, [resetTick, camera]);
+  }, [cameraResetTick, cameraState.type]);
 
-  return workspace === 'MODELING' ? (
-    <OrbitControls 
-      ref={controlsRef} 
-      makeDefault 
-      enableRotate={tool === 'ORBIT'}
-      enablePan={tool === 'ORBIT'}
-      enableZoom={true}
-      mouseButtons={{
-        LEFT: THREE.MOUSE.ROTATE,
-        MIDDLE: THREE.MOUSE.PAN,
-        RIGHT: THREE.MOUSE.ROTATE
-      }}
-    />
-  ) : null;
+  // 2. Dynamic FOV Syncing
+  useEffect(() => {
+    if (cameraState.type === 'PERSPECTIVE' && (camera as any).isPerspectiveCamera) {
+      (camera as THREE.PerspectiveCamera).fov = cameraState.fov;
+      camera.updateProjectionMatrix();
+    }
+  }, [cameraState.fov, cameraState.type, camera]);
+
+  // 3. Save exact physical coordinates to Zustand on demand
+    useEffect(() => {
+    if (cameraSaveTick > 0) {
+      // Explicitly construct the tuple to satisfy TypeScript
+      const pos: [number, number, number] = [
+        camera.position.x, 
+        camera.position.y, 
+        camera.position.z
+      ];
+      
+      let target: [number, number, number] = [0, 0, 0];
+      
+      if (controlsRef.current && controlsRef.current.target) {
+        target = [
+          controlsRef.current.target.x,
+          controlsRef.current.target.y,
+          controlsRef.current.target.z
+        ];
+      }
+      
+      const zoom = (camera as any).zoom || 1;
+      updateCamera({ position: pos, target, zoom });
+    }
+  }, [cameraSaveTick, updateCamera, camera]);
+
+  const isOrbitTool = tool === 'ORBIT';
+
+  return (
+    <>
+      {cameraState.type === 'PERSPECTIVE' ? (
+        <PerspectiveCamera makeDefault />
+      ) : (
+        <OrthographicCamera makeDefault />
+      )}
+
+      {workspace === 'MODELING' && (
+        <OrbitControls
+          ref={controlsRef}
+          makeDefault
+          enabled={!cameraState.locked}
+          enableRotate={isOrbitTool && !cameraState.locked}
+          enablePan={isOrbitTool && !cameraState.locked}
+          enableZoom={!cameraState.locked}
+          mouseButtons={{
+            LEFT: THREE.MOUSE.ROTATE,
+            MIDDLE: THREE.MOUSE.PAN,
+            RIGHT: THREE.MOUSE.ROTATE
+          }}
+        />
+      )}
+    </>
+  );
 };
 
 const NodeMesh: React.FC<{ node: SceneNode }> = ({ node }) => {
@@ -62,14 +111,12 @@ const NodeMesh: React.FC<{ node: SceneNode }> = ({ node }) => {
   const isSelected = selectedNodeId === node.id;
   const { workspace, tool } = useCanvasStore();
   
-  // CRITICAL FIX 1: Use state for the mesh target to guarantee TransformControls binds correctly
   const [meshTarget, setMeshTarget] = useState<THREE.Mesh | null>(null);
   const transformRef = useRef<any>(null);
 
   const showTransform = isSelected && workspace === 'MODELING' && ['SELECT', 'ROTATE', 'SCALE'].includes(tool);
   const transformMode = tool === 'ROTATE' ? 'rotate' : tool === 'SCALE' ? 'scale' : 'translate';
 
-  // CRITICAL FIX 2: Layout effect ensures the UI strictly matches the store ONLY when we aren't dragging
   useLayoutEffect(() => {
     if (meshTarget && !globalIsDragging) {
       meshTarget.position.set(node.position[0], node.position[1], node.position[2]);
@@ -78,7 +125,6 @@ const NodeMesh: React.FC<{ node: SceneNode }> = ({ node }) => {
     }
   }, [meshTarget, node.position, node.rotation, node.scale]);
 
-  // CRITICAL FIX 3: Bind to the native Three.js event, not React's synthetic mouse events
   useEffect(() => {
     const controls = transformRef.current;
     if (controls) {
@@ -87,7 +133,7 @@ const NodeMesh: React.FC<{ node: SceneNode }> = ({ node }) => {
         globalIsDragging = isDragging;
         
         if (!isDragging) {
-          globalDragEnd = Date.now(); // Record exactly when drag stopped
+          globalDragEnd = Date.now();
           
           if (meshTarget) {
             const p = meshTarget.position;
@@ -105,14 +151,14 @@ const NodeMesh: React.FC<{ node: SceneNode }> = ({ node }) => {
       controls.addEventListener('dragging-changed', onDragChange);
       return () => controls.removeEventListener('dragging-changed', onDragChange);
     }
-  }, [meshTarget, node.id, updateNode, showTransform]); // Re-bind if tools switch
+  }, [meshTarget, node.id, updateNode, showTransform]); 
 
   if (node.visible === false) return null;
 
   return (
     <>
       <mesh
-        ref={setMeshTarget} // Populates state instantly once ThreeJS creates the mesh
+        ref={setMeshTarget} 
         castShadow={node.castShadow ?? true}
         receiveShadow={node.receiveShadow ?? true}
         onClick={(e) => {
@@ -141,7 +187,7 @@ const NodeMesh: React.FC<{ node: SceneNode }> = ({ node }) => {
       {showTransform && meshTarget && (
         <TransformControls 
           ref={transformRef}
-          object={meshTarget} // Guaranteed to be a valid mesh now
+          object={meshTarget}
           mode={transformMode}
           size={0.6}
           translationSnap={environment?.snapToGrid ? 1 : null}
@@ -159,14 +205,13 @@ export const ReferenceViewer: React.FC = () => {
 
   return (
     <div className="absolute inset-0 z-0">
+      {/* Removed the hardcoded camera fallback to enforce CameraRig usage */}
       <Canvas
-        camera={{ position: [5, 5, 5], fov: 50 }}
         shadows={{ type: THREE.PCFSoftShadowMap }}
         gl={{ preserveDrawingBuffer: true, antialias: true }}
         resize={{ offsetSize: true }}
         onPointerMissed={(e) => {
           if (e.type === 'click' && useCanvasStore.getState().workspace === 'MODELING') {
-            // CRITICAL FIX 4: Ignore the "miss" if it happened within 250ms of letting go of a gizmo handle
             if (!globalIsDragging && Date.now() - globalDragEnd > 250) {
               useSceneStore.getState().selectNode(null);
             }
@@ -195,7 +240,7 @@ export const ReferenceViewer: React.FC = () => {
         {environment?.gridVisible && <gridHelper args={[environment.gridSize, environment.gridSize]} />}
         {environment?.axesVisible && <axesHelper args={[environment.gridSize / 2]} />}
         
-        <OrbitAndCameraHandler />
+        <CameraRig />
       </Canvas>
     </div>
   );

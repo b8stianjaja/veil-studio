@@ -1,8 +1,7 @@
 import React, { useRef } from 'react';
 import { useSceneStore } from '../../store/useSceneStore';
 import { useCanvasStore } from '../../store/useCanvasStore';
-import { useAnimationStore } from '../../store/useAnimationStore';
-import { Download, Save, Upload, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lock, Unlock, Trash2, Folder, FolderOpen, Eye, EyeOff } from 'lucide-react';
+import { Download, Save, Upload, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lock, Unlock, Trash2, Folder, FolderOpen, Eye, EyeOff, Video } from 'lucide-react';
 import { ExportService } from '../../services/ExportService';
 import { StudioEngine } from '../../core/StudioEngine';
 import gsap from 'gsap';
@@ -15,7 +14,6 @@ export const InspectorPanel: React.FC = () => {
   const { width, height } = useCanvasStore(state => state.projectConfig);
   const setProjectConfig = useCanvasStore(state => state.setProjectConfig);
   const setBackgroundColor = useCanvasStore(state => state.setBackgroundColor);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
 
   useGSAP(() => {
@@ -27,15 +25,6 @@ export const InspectorPanel: React.FC = () => {
       delay: 0.15
     });
   }, { scope: panelRef });
-
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      ExportService.importProjectJSON(file);
-      // Reset input completely so the same file could be imported again if needed
-      e.target.value = '';
-    }
-  };
   
   return (
     <div ref={panelRef} className="w-full h-full bg-bg-panel border-l border-border-subtle text-text-secondary flex flex-col uppercase text-xs tracking-wider z-10 shadow-3xl">
@@ -98,7 +87,13 @@ export const InspectorPanel: React.FC = () => {
 };
 
 const ThreeDControls = () => {
-  const { nodes, selectedNodeId, updateNode, addNode, removeNode, lights, updateLighting, environment, updateEnvironment } = useSceneStore();
+  const { 
+    nodes, selectedNodeId, updateNode, addNode, removeNode, 
+    lights, updateLighting, 
+    environment, updateEnvironment,
+    camera, updateCamera, triggerCameraReset, triggerCameraSave
+  } = useSceneStore();
+  
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -124,6 +119,61 @@ const ThreeDControls = () => {
               {type}
             </button>
           ))}
+        </div>
+      </Accordion>
+
+      <Accordion title="Camera" defaultExpanded={true}>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+             <button 
+               onClick={() => updateCamera({ type: 'PERSPECTIVE' })}
+               className={`py-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.type === 'PERSPECTIVE' ? 'bg-bg-active text-text-primary' : 'bg-bg-input text-text-muted hover:bg-bg-hover'}`}
+             >
+               Perspective
+             </button>
+             <button 
+               onClick={() => updateCamera({ type: 'ORTHOGRAPHIC' })}
+               className={`py-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.type === 'ORTHOGRAPHIC' ? 'bg-bg-active text-text-primary' : 'bg-bg-input text-text-muted hover:bg-bg-hover'}`}
+             >
+               Orthographic
+             </button>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-2">
+             <button 
+               onClick={() => updateCamera({ locked: !camera.locked })}
+               className={`py-1.5 flex items-center justify-center gap-1 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.locked ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-bg-input text-text-muted hover:bg-bg-hover border border-transparent'}`}
+             >
+               {camera.locked ? <Lock size={12}/> : <Unlock size={12}/>} 
+               {camera.locked ? 'Locked' : 'Unlocked'}
+             </button>
+             <button 
+               onClick={triggerCameraSave}
+               className="py-1.5 flex items-center justify-center gap-1 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors bg-bg-input text-text-muted hover:bg-bg-hover hover:text-text-primary border border-border-strong"
+             >
+               <Save size={12}/> Save View
+             </button>
+          </div>
+
+          <button 
+            onClick={triggerCameraReset}
+            className="w-full py-1.5 flex items-center justify-center gap-1 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors bg-bg-input text-text-muted hover:bg-bg-hover hover:text-text-primary border border-border-strong"
+          >
+            <Video size={12} /> Restore Saved View
+          </button>
+
+          <div className={camera.type === 'ORTHOGRAPHIC' ? 'opacity-50 pointer-events-none transition-opacity' : 'transition-opacity'}>
+            <div className="flex justify-between mb-1 mt-3">
+              <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase">Field of View</span>
+              <span className="text-[10px] text-text-muted font-mono">{camera.fov}°</span>
+            </div>
+            <input 
+              type="range" 
+              min="20" max="120" step="1"
+              value={camera.fov}
+              onChange={(e) => updateCamera({ fov: parseInt(e.target.value) })}
+            />
+          </div>
         </div>
       </Accordion>
 
@@ -168,11 +218,13 @@ const ThreeDControls = () => {
         <>
           <Accordion title="Transform">
             <div className="space-y-3">
-              {[
-                { label: 'Position', prop: 'position' },
-                { label: 'Rotation', prop: 'rotation' },
-                { label: 'Scale', prop: 'scale' }
-              ].map(({ label, prop }) => (
+              {(
+                [
+                  { label: 'Position', prop: 'position' },
+                  { label: 'Rotation', prop: 'rotation' },
+                  { label: 'Scale', prop: 'scale' }
+                ] as const
+              ).map(({ label, prop }) => (
                 <div key={prop}>
                    <span className="text-[10px] text-text-muted mb-1 block">{label}</span>
                    <div className="flex gap-1">
@@ -182,12 +234,14 @@ const ThreeDControls = () => {
                           <input 
                             type="number"
                             step={prop === 'scale' ? 0.1 : 1}
-                            value={selectedNode[prop as keyof typeof selectedNode]?.[i] ?? (prop === 'scale' ? 1 : 0)}
+                            value={selectedNode[prop][i] ?? (prop === 'scale' ? 1 : 0)}
                             onChange={(e) => {
                               const str = e.target.value;
-                              const val = str === '' ? '' : (parseFloat(str) || 0);
-                              const current = [...(selectedNode[prop as keyof typeof selectedNode] as any || (prop === 'scale' ? [1,1,1] : [0,0,0]))] as any;
+                              const val = str === '' ? 0 : (parseFloat(str) || 0);
+                              
+                              const current = [...selectedNode[prop]] as [number, number, number];
                               current[i] = val;
+                              
                               updateNode(selectedNode.id, { [prop]: current });
                             }}
                             className="w-full bg-transparent p-1 text-xs outline-none text-center font-mono text-text-secondary"
@@ -331,8 +385,8 @@ const ThreeDControls = () => {
                       value={lights.angle[i]}
                       onChange={(e) => {
                         const str = e.target.value;
-                        const val = str === '' ? '' : (parseFloat(str) || 0);
-                        const current = [...lights.angle] as any;
+                        const val = str === '' ? 0 : (parseFloat(str) || 0);
+                        const current = [...lights.angle] as [number, number, number];
                         current[i] = val;
                         updateLighting({ angle: current });
                       }}
@@ -353,7 +407,6 @@ const TwoDControls = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useGSAP(() => {
-    // Animate controls in
     gsap.from(containerRef.current, {
       opacity: 0,
       y: 10,
@@ -556,7 +609,6 @@ const LayerThumbnail = ({ layerId }: { layerId: string }) => {
         if (ctx) {
           ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
           
-          // Calculate scaling to fit within 32x32 preserving aspect ratio
           const scale = Math.min(32 / sourceCanvas.width, 32 / sourceCanvas.height);
           const w = sourceCanvas.width * scale;
           const h = sourceCanvas.height * scale;
@@ -741,17 +793,11 @@ const LayerItemNode = ({ layer, allLayers, depth = 0 }: any) => {
           >
             <ChevronDown size={12} />
           </button>
-
-          {/* Indent: Move into the folder immediately below it in order (wait, our list is visually reversed. 
-             If we sort by order descending, "above" visually means a higher order. FOLDER with higher order.
-             Let's just define: indenting assigns parentId to the previous FOLDER in the same level.
-          */}
           <button
             onClick={(e) => {
               e.stopPropagation();
               const sortedSameLevel = allLayers.filter((l: any) => l.parentId === layer.parentId).sort((a: any, b: any) => a.order - b.order);
               const idx = sortedSameLevel.findIndex((l: any) => l.id === layer.id);
-              // "visually above" is index + 1 in sorted order (since b.order - a.order sort puts higher order first)
               if (idx < sortedSameLevel.length - 1) {
                 const possibleFolder = sortedSameLevel[idx + 1];
                 if (possibleFolder.type === 'FOLDER') {
