@@ -545,9 +545,9 @@ export const WorkspaceLayout: React.FC = () => {
           
           {isSpritesheetMode && <AnimationPreview />}
 
-          <div 
+        <div 
             ref={viewportRef}
-            className="flex-1 overflow-hidden relative select-none z-0"
+            className="flex-1 overflow-hidden relative select-none z-0 touch-none" /* <-- Added touch-none here */
             style={{
               /* Adaptive grid using CSS variables */
               backgroundImage: `radial-gradient(var(--color-border-strong) 1px, transparent 1px)`,

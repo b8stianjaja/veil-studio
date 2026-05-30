@@ -26,24 +26,25 @@ const CameraRig: React.FC = () => {
   const controlsRef = useRef<any>(null);
   const { camera } = useThree();
 
-  // 1. Explicit Reset Trigger (Fires only when the user clicks the "Reset Camera" tool)
+  // 1. Explicit Restore Trigger (Ensures exact coordinates & projection properties)
   useEffect(() => {
     if (cameraResetTick > 0 && !cameraState.locked) {
-      camera.position.set(5, 5, 5);
+      camera.position.set(cameraState.position[0], cameraState.position[1], cameraState.position[2]);
       
+      // If we are in Isometric/Orthographic, we must restore the scale/zoom
       if (cameraState.type === 'ORTHOGRAPHIC') {
-         (camera as THREE.OrthographicCamera).zoom = 50;
+         (camera as THREE.OrthographicCamera).zoom = cameraState.zoom || 50;
          camera.updateProjectionMatrix();
       }
-      
+
       if (controlsRef.current) {
-        controlsRef.current.target.set(0, 0, 0);
+        controlsRef.current.target.set(cameraState.target[0], cameraState.target[1], cameraState.target[2]);
         controlsRef.current.update();
       }
     }
-  }, [cameraResetTick]);
+  }, [cameraResetTick, cameraState.type]);
 
-  // 2. Save physical coordinates to Zustand on demand (For Auto-save & Export)
+  // 2. High-Fidelity State Save
   useEffect(() => {
     if (cameraSaveTick > 0) {
       const pos: [number, number, number] = [
@@ -53,7 +54,6 @@ const CameraRig: React.FC = () => {
       ];
       
       let target: [number, number, number] = [0, 0, 0];
-      
       if (controlsRef.current && controlsRef.current.target) {
         target = [
           controlsRef.current.target.x,
@@ -62,8 +62,9 @@ const CameraRig: React.FC = () => {
         ];
       }
       
-      const zoom = (camera as any).zoom || 1;
-      updateCamera({ position: pos, target, zoom });
+      // Capture the physical zoom level if Orthographic is active
+      const currentZoom = (camera as any).zoom || 50;
+      updateCamera({ position: pos, target, zoom: currentZoom });
     }
   }, [cameraSaveTick, updateCamera, camera]);
 
@@ -71,7 +72,6 @@ const CameraRig: React.FC = () => {
 
   return (
     <>
-      {/* Declarative Camera Mounting ensures instant property inheritance */}
       {cameraState.type === 'PERSPECTIVE' ? (
         <PerspectiveCamera 
           makeDefault 
@@ -84,13 +84,12 @@ const CameraRig: React.FC = () => {
         <OrthographicCamera 
           makeDefault 
           position={cameraState.position}
-          zoom={cameraState.zoom}
+          zoom={cameraState.zoom || 50}
           near={cameraState.near}
           far={cameraState.far}
         />
       )}
 
-      {/* OrbitControls connects to the makeDefault camera automatically */}
       {workspace === 'MODELING' && (
         <OrbitControls
           ref={controlsRef}
@@ -100,10 +99,14 @@ const CameraRig: React.FC = () => {
           enableRotate={isOrbitTool && !cameraState.locked}
           enablePan={isOrbitTool && !cameraState.locked}
           enableZoom={!cameraState.locked}
+          enableDamping={true} 
+          dampingFactor={0.08}
+          rotateSpeed={0.8}
+          panSpeed={0.8}
           mouseButtons={{
             LEFT: THREE.MOUSE.ROTATE,
             MIDDLE: THREE.MOUSE.PAN,
-            RIGHT: THREE.MOUSE.ROTATE
+            RIGHT: THREE.MOUSE.PAN 
           }}
         />
       )}

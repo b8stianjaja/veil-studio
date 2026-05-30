@@ -140,58 +140,117 @@ const ThreeDControls = () => {
         </div>
       </Accordion>
 
-      <Accordion title="Camera" defaultExpanded={true}>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-             <button 
-               onClick={() => updateCamera({ type: 'PERSPECTIVE' })}
-               className={`py-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.type === 'PERSPECTIVE' ? 'bg-bg-active text-text-primary' : 'bg-bg-input text-text-muted hover:bg-bg-hover'}`}
-             >
-               Perspective
-             </button>
-             <button 
-               onClick={() => updateCamera({ type: 'ORTHOGRAPHIC' })}
-               className={`py-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.type === 'ORTHOGRAPHIC' ? 'bg-bg-active text-text-primary' : 'bg-bg-input text-text-muted hover:bg-bg-hover'}`}
-             >
-               Orthographic
-             </button>
+    <Accordion title="Camera" defaultExpanded={true}>
+        <div className="space-y-4">
+          
+          {/* 1. Projection Paradigm */}
+          <div>
+            <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase mb-2 block">Projection Type</span>
+            <div className="grid grid-cols-2 gap-2">
+               <button 
+                 onClick={() => updateCamera({ type: 'PERSPECTIVE' })}
+                 className={`py-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.type === 'PERSPECTIVE' ? 'bg-bg-active text-text-primary border border-border-strong shadow-sm' : 'bg-bg-input text-text-muted hover:bg-bg-hover border border-transparent'}`}
+               >
+                 Perspective
+               </button>
+               <button 
+                 onClick={() => updateCamera({ type: 'ORTHOGRAPHIC' })}
+                 className={`py-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.type === 'ORTHOGRAPHIC' ? 'bg-bg-active text-text-primary border border-border-strong shadow-sm' : 'bg-bg-input text-text-muted hover:bg-bg-hover border border-transparent'}`}
+               >
+                 Isometric
+               </button>
+            </div>
+          </div>
+
+        {/* 2. Standard Views */}
+          <div>
+            <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase mb-2 block">Standard Views</span>
+            <div className="grid grid-cols-3 gap-1">
+               {[
+                 { id: 'TOP', label: 'TOP', pos: [0, 10, 0] },
+                 { id: 'FRONT', label: 'FRONT', pos: [0, 0, 10] },
+                 { id: 'RIGHT', label: 'RIGHT', pos: [10, 0, 0] },
+                 { id: 'BOTTOM', label: 'BOTTOM', pos: [0, -10, 0] },
+                 { id: 'BACK', label: 'BACK', pos: [0, 0, -10] },
+                 { id: 'LEFT', label: 'LEFT', pos: [-10, 0, 0] }
+               ].map(preset => (
+                 <button
+                   key={preset.id}
+                   onClick={() => {
+                     // Purely translates position and points at origin. 
+                     // Respects whatever Projection Type is currently active.
+                     updateCamera({ position: preset.pos as [number, number, number], target: [0, 0, 0] });
+                     triggerCameraReset(); 
+                   }}
+                   className="py-1.5 bg-bg-input hover:bg-bg-hover text-text-secondary hover:text-text-primary rounded text-[9px] font-bold tracking-wider uppercase transition border border-border-strong shadow-sm"
+                 >
+                   {preset.label}
+                 </button>
+               ))}
+            </div>
+          </div>
+
+          {/* 3. State & Storage Workflow */}
+          <div>
+            <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase mb-2 block">State & Storage</span>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+               <button 
+                 onClick={() => updateCamera({ locked: !camera.locked })}
+                 className={`py-1.5 flex items-center justify-center gap-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.locked ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-bg-input text-text-muted hover:bg-bg-hover border border-border-strong'}`}
+               >
+                 {camera.locked ? <Lock size={12}/> : <Unlock size={12}/>} 
+                 {camera.locked ? 'Locked' : 'Unlocked'}
+               </button>
+               <button 
+                 onClick={triggerCameraSave}
+                 className="py-1.5 flex items-center justify-center gap-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors bg-bg-input text-text-muted hover:bg-bg-hover hover:text-text-primary border border-border-strong shadow-sm"
+               >
+                 <Save size={12}/> Save View
+               </button>
+            </div>
+
+            <button 
+              onClick={triggerCameraReset}
+              className="w-full py-1.5 flex items-center justify-center gap-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors bg-bg-input text-text-muted hover:bg-bg-hover hover:text-text-primary border border-border-strong shadow-sm"
+              title="Restores to the exact view and projection saved"
+            >
+              <Video size={12} /> Restore Saved View
+            </button>
+          </div>
+
+          {/* 4. Dynamic Lens Properties */}
+          <div className="pt-2 border-t border-border-subtle">
+            {camera.type === 'PERSPECTIVE' ? (
+              <>
+                <div className="flex justify-between mb-1">
+                  <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase">Field of View</span>
+                  <span className="text-[10px] text-text-muted font-mono">{camera.fov}°</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="20" max="120" step="1"
+                  value={camera.fov}
+                  onChange={(e) => updateCamera({ fov: parseInt(e.target.value) })}
+                  className="w-full"
+                />
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between mb-1">
+                  <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase">Ortho Scale</span>
+                  <span className="text-[10px] text-text-muted font-mono">{camera.zoom}</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="10" max="200" step="1"
+                  value={camera.zoom || 50}
+                  onChange={(e) => updateCamera({ zoom: parseInt(e.target.value) })}
+                  className="w-full"
+                />
+              </>
+            )}
           </div>
           
-          <div className="grid grid-cols-2 gap-2">
-             <button 
-               onClick={() => updateCamera({ locked: !camera.locked })}
-               className={`py-1.5 flex items-center justify-center gap-1 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.locked ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-bg-input text-text-muted hover:bg-bg-hover border border-transparent'}`}
-             >
-               {camera.locked ? <Lock size={12}/> : <Unlock size={12}/>} 
-               {camera.locked ? 'Locked' : 'Unlocked'}
-             </button>
-             <button 
-               onClick={triggerCameraSave}
-               className="py-1.5 flex items-center justify-center gap-1 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors bg-bg-input text-text-muted hover:bg-bg-hover hover:text-text-primary border border-border-strong"
-             >
-               <Save size={12}/> Save View
-             </button>
-          </div>
-
-          <button 
-            onClick={triggerCameraReset}
-            className="w-full py-1.5 flex items-center justify-center gap-1 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors bg-bg-input text-text-muted hover:bg-bg-hover hover:text-text-primary border border-border-strong"
-          >
-            <Video size={12} /> Restore Saved View
-          </button>
-
-          <div className={camera.type === 'ORTHOGRAPHIC' ? 'opacity-50 pointer-events-none transition-opacity' : 'transition-opacity'}>
-            <div className="flex justify-between mb-1 mt-3">
-              <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase">Field of View</span>
-              <span className="text-[10px] text-text-muted font-mono">{camera.fov}°</span>
-            </div>
-            <input 
-              type="range" 
-              min="20" max="120" step="1"
-              value={camera.fov}
-              onChange={(e) => updateCamera({ fov: parseInt(e.target.value) })}
-            />
-          </div>
         </div>
       </Accordion>
 

@@ -53,6 +53,7 @@
 @layer base {
   body {
     @apply bg-bg-app text-text-primary transition-colors duration-300 antialiased;
+    overscroll-behavior: none; /* Add this to prevent elastic scroll/pull-to-refresh */
   }
   input[type="range"] {
     @apply appearance-none bg-transparent w-full cursor-pointer;
