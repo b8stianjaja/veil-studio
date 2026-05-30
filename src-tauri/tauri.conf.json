@@ -38,12 +38,16 @@
     ],
     "windows": {
       "nsis": {
-        "installerIcon": "./icons/installer-icon.ico",
-        "uninstallerIcon": "./icons/uninstaller-icon.ico",
-        "headerImage": "./icons/header.bmp",
-        "sidebarImage": "./icons/sidebar.bmp",
-        "template": "custom-installer.nsi"
+        "installerIcon": "icons/installer-icon.ico",
+        "uninstallerIcon": "icons/uninstaller-icon.ico",
+        "headerImage": "icons/header.bmp",
+        "sidebarImage": "icons/sidebar.bmp",
+        "customLanguageFiles": {
+          "en-US": "./en-US.nsh"
+        }
       }
     }
+
+
   }
 }
