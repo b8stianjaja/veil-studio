@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { useSceneStore } from '../../store/useSceneStore';
 import { useCanvasStore } from '../../store/useCanvasStore';
 import { Download, Save, Upload, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lock, Unlock, Trash2, Folder, FolderOpen, Eye, EyeOff, Video } from 'lucide-react';
@@ -103,16 +103,19 @@ export const InspectorPanel: React.FC = () => {
   );
 };
 
-// ... ThreeDControls unchanged ...
-const ThreeDControls = () => {
+  const ThreeDControls = () => {
+  const [newViewName, setNewViewName] = useState('');
+  
   const { 
-    nodes, selectedNodeId, updateNode, addNode, removeNode, 
+    nodes, selectedNodeId, updateNode, addNode, removeNode, duplicateNode, // <-- Fixed: duplicateNode added here
     lights, updateLighting, 
     environment, updateEnvironment,
-    camera, updateCamera, triggerCameraReset, triggerCameraSave
+    camera, updateCamera, triggerCameraReset,
+    savedViews, requestSaveView, removeSavedView, applySavedView
   } = useSceneStore();
   
-  const selectedNode = nodes.find(n => n.id === selectedNodeId);
+  // Fixed: Explicit type to prevent implicit any
+  const selectedNode = nodes.find((n: any) => n.id === selectedNodeId);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useGSAP(() => {
@@ -140,7 +143,7 @@ const ThreeDControls = () => {
         </div>
       </Accordion>
 
-    <Accordion title="Camera" defaultExpanded={true}>
+      <Accordion title="Camera" defaultExpanded={true}>
         <div className="space-y-4">
           
           {/* 1. Projection Paradigm */}
@@ -162,7 +165,7 @@ const ThreeDControls = () => {
             </div>
           </div>
 
-        {/* 2. Standard Views */}
+          {/* 2. Standard Views */}
           <div>
             <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase mb-2 block">Standard Views</span>
             <div className="grid grid-cols-3 gap-1">
@@ -177,8 +180,6 @@ const ThreeDControls = () => {
                  <button
                    key={preset.id}
                    onClick={() => {
-                     // Purely translates position and points at origin. 
-                     // Respects whatever Projection Type is currently active.
                      updateCamera({ position: preset.pos as [number, number, number], target: [0, 0, 0] });
                      triggerCameraReset(); 
                    }}
@@ -190,32 +191,69 @@ const ThreeDControls = () => {
             </div>
           </div>
 
-          {/* 3. State & Storage Workflow */}
+          {/* 3. View Manager */}
           <div>
-            <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase mb-2 block">State & Storage</span>
-            <div className="grid grid-cols-2 gap-2 mb-2">
-               <button 
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase block">Saved Views</span>
+              <button 
                  onClick={() => updateCamera({ locked: !camera.locked })}
-                 className={`py-1.5 flex items-center justify-center gap-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors ${camera.locked ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-bg-input text-text-muted hover:bg-bg-hover border border-border-strong'}`}
+                 className={`py-1 px-2 flex items-center justify-center gap-1.5 rounded-sm text-[9px] font-bold tracking-wider uppercase transition-colors ${camera.locked ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-bg-input text-text-muted hover:bg-bg-hover hover:text-text-primary border border-border-strong shadow-sm'}`}
                >
-                 {camera.locked ? <Lock size={12}/> : <Unlock size={12}/>} 
+                 {camera.locked ? <Lock size={10}/> : <Unlock size={10}/>} 
                  {camera.locked ? 'Locked' : 'Unlocked'}
                </button>
+            </div>
+            
+            <div className="flex gap-1 mb-2">
+               <input 
+                 type="text" 
+                 value={newViewName}
+                 onChange={(e) => setNewViewName(e.target.value)}
+                 placeholder="Name current view..."
+                 className="flex-1 bg-bg-app border border-border-subtle rounded-sm px-2 py-1 text-[10px] outline-none focus:border-border-strong transition text-text-primary"
+                 onKeyDown={(e) => {
+                   if (e.key === 'Enter' && newViewName.trim()) {
+                     requestSaveView(newViewName.trim());
+                     setNewViewName('');
+                   }
+                 }}
+               />
                <button 
-                 onClick={triggerCameraSave}
-                 className="py-1.5 flex items-center justify-center gap-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors bg-bg-input text-text-muted hover:bg-bg-hover hover:text-text-primary border border-border-strong shadow-sm"
+                 onClick={() => {
+                   if (newViewName.trim()) {
+                     requestSaveView(newViewName.trim());
+                     setNewViewName('');
+                   }
+                 }}
+                 disabled={!newViewName.trim()}
+                 className="px-2.5 py-1 bg-bg-input hover:bg-bg-active text-text-primary border border-border-strong disabled:opacity-30 disabled:pointer-events-none rounded-sm transition text-[10px] font-bold shadow-sm"
                >
-                 <Save size={12}/> Save View
+                 <Video size={12} />
                </button>
             </div>
 
-            <button 
-              onClick={triggerCameraReset}
-              className="w-full py-1.5 flex items-center justify-center gap-1.5 rounded-sm text-[10px] font-semibold tracking-wider uppercase transition-colors bg-bg-input text-text-muted hover:bg-bg-hover hover:text-text-primary border border-border-strong shadow-sm"
-              title="Restores to the exact view and projection saved"
-            >
-              <Video size={12} /> Restore Saved View
-            </button>
+            <div className="flex flex-col gap-1 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+              {savedViews.length === 0 ? (
+                <div className="text-[9px] text-text-muted italic text-center py-2 bg-bg-input/50 rounded-sm border border-border-subtle border-dashed">
+                  No custom views saved
+                </div>
+              ) : (
+                savedViews.map((view: any) => (  // <-- Fixed: explicitly typed view to clear the warning
+                  <div key={view.id} className="flex items-center justify-between group bg-bg-input border border-border-subtle hover:border-border-strong rounded-sm px-2 py-1 transition-colors cursor-pointer" onClick={() => applySavedView(view.id)}>
+                    <span className="flex-1 text-[10px] text-text-secondary group-hover:text-text-primary font-medium truncate">
+                      {view.name}
+                    </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeSavedView(view.id); }}
+                      className="text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded"
+                      title="Delete View"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
 
           {/* 4. Dynamic Lens Properties */}
@@ -332,7 +370,7 @@ const ThreeDControls = () => {
               <div className="pt-2 border-t border-border-subtle mt-2 flex gap-2">
                  <button
                    className="flex-1 bg-bg-input hover:bg-bg-hover border border-border-strong text-text-secondary py-1.5 rounded transition flex items-center justify-center gap-2 font-semibold tracking-wider text-[10px] uppercase"
-                   onClick={() => useSceneStore.getState().duplicateNode(selectedNode.id)}
+                   onClick={() => duplicateNode(selectedNode.id)}
                  >
                    Duplicate
                  </button>

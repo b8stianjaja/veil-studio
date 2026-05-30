@@ -51,6 +51,15 @@ export interface CameraConfig {
   zoom: number;
 }
 
+export interface SavedCameraView {
+  id: string;
+  name: string;
+  position: [number, number, number];
+  target: [number, number, number];
+  zoom: number;
+  type: 'PERSPECTIVE' | 'ORTHOGRAPHIC';
+}
+
 export interface LayerConfig {
   id: string;
   order: number;
@@ -80,6 +89,7 @@ export interface VeilProject {
     nodes: SceneNode[];
     lights: LightingConfig;
     camera: CameraConfig;
+    savedViews?: SavedCameraView[]; // <-- ADD THIS LINE
   };
   animation: {
     rows: number;

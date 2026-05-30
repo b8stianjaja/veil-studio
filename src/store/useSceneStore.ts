@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { SceneNode, LightingConfig, EnvironmentConfig, CameraConfig } from '../types';
+import { SceneNode, LightingConfig, EnvironmentConfig, CameraConfig, SavedCameraView } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface SceneState {
@@ -8,6 +8,8 @@ interface SceneState {
   environment: EnvironmentConfig;
   camera: CameraConfig;
   selectedNodeId: string | null;
+  savedViews: SavedCameraView[];
+  saveViewRequest: { tick: number, name: string };
   addNode: (type: SceneNode['type']) => void;
   duplicateNode: (id: string) => string | null;
   updateNode: (id: string, updates: Partial<SceneNode>) => void;
@@ -17,11 +19,12 @@ interface SceneState {
   updateLighting: (updates: Partial<LightingConfig>) => void;
   updateEnvironment: (updates: Partial<EnvironmentConfig>) => void;
   updateCamera: (updates: Partial<CameraConfig>) => void;
-  restoreState: (nodes: SceneNode[], lights: LightingConfig, environment?: EnvironmentConfig, camera?: CameraConfig) => void;
-  cameraResetTick: number;
-  cameraSaveTick: number;
+  restoreState: (nodes: SceneNode[], lights: LightingConfig, environment?: EnvironmentConfig, camera?: CameraConfig, savedViews?: SavedCameraView[]) => void;  cameraResetTick: number;
   triggerCameraReset: () => void;
-  triggerCameraSave: () => void;
+  requestSaveView: (name: string) => void;
+  addSavedView: (view: SavedCameraView) => void;
+  removeSavedView: (id: string) => void;
+  applySavedView: (id: string) => void;
 }
 
 export const useSceneStore = create<SceneState>((set) => ({
@@ -49,6 +52,8 @@ export const useSceneStore = create<SceneState>((set) => ({
     zoom: 50
   },
   selectedNodeId: null,
+  savedViews: [],
+  saveViewRequest: { tick: 0, name: '' },
   
   addNode: (type) => set((state) => {
     const newId = uuidv4();
@@ -140,22 +145,46 @@ export const useSceneStore = create<SceneState>((set) => ({
     camera: { ...state.camera, ...updates }
   })),
 
-  restoreState: (nodes, lights, environment, camera) => set((state) => ({ 
+  restoreState: (nodes, lights, environment, camera, savedViews) => set((state) => ({ 
     nodes, 
     lights, 
     environment: environment ?? state.environment,
     camera: camera ?? state.camera,
+    savedViews: savedViews ?? state.savedViews,
     selectedNodeId: null 
   })),
 
   cameraResetTick: 0,
-  cameraSaveTick: 0,
   
   triggerCameraReset: () => set((state) => ({ 
     cameraResetTick: state.cameraResetTick + 1 
   })),
-  
-  triggerCameraSave: () => set((state) => ({
-    cameraSaveTick: state.cameraSaveTick + 1
-  }))
+
+  requestSaveView: (name) => set(state => ({
+    saveViewRequest: { tick: state.saveViewRequest.tick + 1, name }
+  })),
+
+  addSavedView: (view) => set(state => ({
+    savedViews: [...state.savedViews, view]
+  })),
+
+  removeSavedView: (id) => set(state => ({
+    savedViews: state.savedViews.filter(v => v.id !== id)
+  })),
+
+  applySavedView: (id) => set(state => {
+    const view = state.savedViews.find(v => v.id === id);
+    if (!view) return state;
+    
+    return {
+      camera: {
+        ...state.camera,
+        type: view.type,
+        position: [...view.position],
+        target: [...view.target],
+        zoom: view.zoom
+      },
+      cameraResetTick: state.cameraResetTick + 1
+    };
+  })
 }));

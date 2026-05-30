@@ -6,6 +6,7 @@ import { useSceneStore } from '../../store/useSceneStore';
 import { useCanvasStore } from '../../store/useCanvasStore';
 import { StudioEngine } from '../../core/StudioEngine';
 import { SceneNode } from '../../types';
+import gsap from 'gsap';
 
 let globalDragEnd = 0;
 let globalIsDragging = false;
@@ -21,32 +22,51 @@ const EngineBridge = () => {
 // Replaces the old static handler with a robust dynamic Camera Rig
 // Replaces the old static handler with a robust declarative Camera Rig
 const CameraRig: React.FC = () => {
-  const { camera: cameraState, cameraResetTick, cameraSaveTick, updateCamera } = useSceneStore();
+  const { camera: cameraState, cameraResetTick, saveViewRequest, addSavedView, updateCamera } = useSceneStore();
   const { workspace, tool } = useCanvasStore();
   const controlsRef = useRef<any>(null);
   const { camera } = useThree();
 
-  // 1. Explicit Restore Trigger (Ensures exact coordinates & projection properties)
+  // 1. Smoothly Animate to Saved/Standard Views
   useEffect(() => {
     if (cameraResetTick > 0 && !cameraState.locked) {
-      camera.position.set(cameraState.position[0], cameraState.position[1], cameraState.position[2]);
       
-      // If we are in Isometric/Orthographic, we must restore the scale/zoom
+      // Animate physical coordinates
+      gsap.to(camera.position, {
+        x: cameraState.position[0],
+        y: cameraState.position[1],
+        z: cameraState.position[2],
+        duration: 0.6,
+        ease: 'power3.out'
+      });
+
+      // Handle Orthographic specific zoom animation
       if (cameraState.type === 'ORTHOGRAPHIC') {
-         (camera as THREE.OrthographicCamera).zoom = cameraState.zoom || 50;
-         camera.updateProjectionMatrix();
+        gsap.to(camera as THREE.OrthographicCamera, {
+          zoom: cameraState.zoom || 50,
+          duration: 0.6,
+          ease: 'power3.out',
+          onUpdate: () => camera.updateProjectionMatrix()
+        });
       }
 
+      // Animate OrbitControls target to match
       if (controlsRef.current) {
-        controlsRef.current.target.set(cameraState.target[0], cameraState.target[1], cameraState.target[2]);
-        controlsRef.current.update();
+        gsap.to(controlsRef.current.target, {
+          x: cameraState.target[0],
+          y: cameraState.target[1],
+          z: cameraState.target[2],
+          duration: 0.6,
+          ease: 'power3.out',
+          onUpdate: () => controlsRef.current.update()
+        });
       }
     }
-  }, [cameraResetTick, cameraState.type]);
+  }, [cameraResetTick]); // Intentionally isolated dependency
 
   // 2. High-Fidelity State Save
   useEffect(() => {
-    if (cameraSaveTick > 0) {
+    if (saveViewRequest.tick > 0) {
       const pos: [number, number, number] = [
         camera.position.x, 
         camera.position.y, 
@@ -62,11 +82,18 @@ const CameraRig: React.FC = () => {
         ];
       }
       
-      // Capture the physical zoom level if Orthographic is active
       const currentZoom = (camera as any).zoom || 50;
-      updateCamera({ position: pos, target, zoom: currentZoom });
+      
+      addSavedView({
+        id: Date.now().toString(),
+        name: saveViewRequest.name,
+        position: pos,
+        target,
+        zoom: currentZoom,
+        type: cameraState.type
+      });
     }
-  }, [cameraSaveTick, updateCamera, camera]);
+  }, [saveViewRequest.tick, camera, cameraState.type, addSavedView, saveViewRequest.name]);
 
   const isOrbitTool = tool === 'ORBIT';
 

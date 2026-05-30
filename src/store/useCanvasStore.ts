@@ -23,6 +23,7 @@ interface CanvasState {
   symmetryX: boolean;
   symmetryY: boolean;
   showGrid: boolean;
+  
   referenceGrid: {
     show: boolean;
     rows: number;
