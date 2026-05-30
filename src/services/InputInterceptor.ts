@@ -40,7 +40,9 @@ export class InputInterceptor {
         engine.floodFill(x, y);
       } else {
         e.currentTarget.setPointerCapture(e.pointerId);
-        engine.startStroke(x, y);
+        // Extract stylus pressure, defaulting to 0.5 if using a mouse
+        const pressure = e.pressure !== undefined ? e.pressure : 0.5;
+        engine.startStroke(x, y, pressure);
       }
     }
   }
@@ -65,10 +67,12 @@ export class InputInterceptor {
       const y = (e.clientY - rect.top) * scaleY;
       
       if (tool === 'MOVE_2D') {
-        // FIXED: Passing shiftKey for proportional scaling
+        // Passing shiftKey for proportional scaling
         engine.continueMove(x, y, e.shiftKey);
       } else {
-        engine.continueStroke(x, y);
+        // Extract stylus pressure for the ongoing stroke
+        const pressure = e.pressure !== undefined ? e.pressure : 0.5;
+        engine.continueStroke(x, y, pressure);
       }
     }
   }

@@ -13,11 +13,11 @@ export const ProjectSetupModal: React.FC<{ hasAutoSave?: boolean }> = ({ hasAuto
 
   useGSAP(() => {
     gsap.from(modalRef.current, {
-      y: 20,
+      y: 40, // Increased travel distance
       opacity: 0,
-      scale: 0.95,
-      duration: 0.5,
-      ease: 'power3.out'
+      scale: 0.9,
+      duration: 0.7,
+      ease: 'back.out(1.2)' // Adds a subtle, comfortable spring
     });
   });
 
@@ -34,11 +34,11 @@ export const ProjectSetupModal: React.FC<{ hasAutoSave?: boolean }> = ({ hasAuto
     else if (finalHeight > 4096) finalHeight = 4096;
 
     gsap.to(modalRef.current, {
-      y: -20,
+      y: -30,
       opacity: 0,
-      scale: 0.95,
+      scale: 0.9,
       duration: 0.4,
-      ease: 'power3.in',
+      ease: 'back.in(1.2)', // Exit with anticipation physics
       onComplete: () => {
         setProjectConfig({ width: finalWidth, height: finalHeight });
         setProjectConfigured(true);

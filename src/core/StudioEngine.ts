@@ -1,6 +1,7 @@
 // src/core/StudioEngine.ts
 
 import * as THREE from 'three';
+import { getStroke } from 'perfect-freehand';
 import { useCanvasStore } from '../store/useCanvasStore';
 import { useAnimationStore } from '../store/useAnimationStore';
 import { getFlattenedRenderLayers } from '../utils/layerUtils';
@@ -21,7 +22,7 @@ export class StudioEngine {
   private layerCache: Map<string, ImageData> = new Map();
 
   private isDrawing: boolean = false;
-  private currentPath: { x: number, y: number }[] = [];
+  private currentPath: { x: number, y: number, pressure: number }[] = [];
   private strokeSnapshot: ImageData | null = null;
   private rafId: number | null = null;
 
@@ -63,7 +64,7 @@ export class StudioEngine {
   }
 
   private flushPaints() {
-    if (this.currentPath.length < 2) return;
+    if (this.currentPath.length === 0) return;
 
     const state = useCanvasStore.getState();
     const activeLayerId = state.activeLayerId;
@@ -110,15 +111,42 @@ export class StudioEngine {
     ctx.save();
     
     const drawPath = (transform?: { scaleX: number, scaleY: number, transX: number, transY: number }) => {
-      if (this.currentPath.length < 2) return;
-      ctx.beginPath();
+      if (this.currentPath.length === 0) return;
       
-      const applyT = (pt: {x:number,y:number}) => {
+      const applyT = (pt: {x:number, y:number, pressure:number}) => {
         if (!transform) return pt;
-        return { x: pt.x * transform.scaleX + transform.transX, y: pt.y * transform.scaleY + transform.transY };
+        return { x: pt.x * transform.scaleX + transform.transX, y: pt.y * transform.scaleY + transform.transY, pressure: pt.pressure };
       };
       
       const p = this.currentPath.map(applyT);
+      
+      // PERFECT-FREEHAND INTEGRATION
+      if (state.tool === 'BRUSH' || state.tool === 'ERASER') {
+        const strokePoints = getStroke(p.map(pt => [pt.x, pt.y, pt.pressure]), {
+          size: state.brushSize,
+          thinning: 0.6,
+          smoothing: 0.5,
+          streamline: 0.5,
+          simulatePressure: p.every(pt => pt.pressure === 0.5) // Auto-simulate if mouse is used
+        });
+
+        if (strokePoints.length === 0) return;
+
+        ctx.beginPath();
+        ctx.moveTo(strokePoints[0][0], strokePoints[0][1]);
+        for (let i = 1; i < strokePoints.length; i++) {
+          ctx.lineTo(strokePoints[i][0], strokePoints[i][1]);
+        }
+        ctx.closePath();
+        
+        ctx.fillStyle = brushStr; // Fill polygon instead of stroke
+        ctx.fill();
+        return; // Exit early for perfect-freehand
+      }
+      
+      // FALLBACK FOR GEOMETRIC SHAPES
+      if (this.currentPath.length < 2) return;
+      ctx.beginPath();
       
       if (state.tool === 'SHAPE_RECT') {
         const start = p[0];
@@ -148,7 +176,6 @@ export class StudioEngine {
           ctx.lineTo(p[1].x, p[1].y);
         }
       }
-      
       ctx.stroke();
     };
 
@@ -430,7 +457,7 @@ export class StudioEngine {
   }
   
   // --- DRAWING TOOL LOGIC ---
-  public startStroke(x: number, y: number) {
+  public startStroke(x: number, y: number, pressure: number = 0.5) {
     const state = useCanvasStore.getState();
     const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
     if (activeLayer?.locked) return;
@@ -451,10 +478,10 @@ export class StudioEngine {
     }
 
     this.isDrawing = true;
-    this.currentPath = [{ x: nx, y: ny }];
+    this.currentPath = [{ x: nx, y: ny, pressure }];
   }
 
-  public continueStroke(x: number, y: number) {
+  public continueStroke(x: number, y: number, pressure: number = 0.5) {
     if (!this.isDrawing) return;
     
     const state = useCanvasStore.getState();
@@ -466,7 +493,7 @@ export class StudioEngine {
       ny = Math.round(ny / 50) * 50;
     }
 
-    this.currentPath.push({ x: nx, y: ny });
+    this.currentPath.push({ x: nx, y: ny, pressure });
   }
 
   private saveHistoryState(layerId: string, imageData: ImageData) {
@@ -785,8 +812,6 @@ export class StudioEngine {
     state.markLayerUpdated(layerId);
   }
 
-  private thumbCanvas: HTMLCanvasElement | null = null;
-  
   public getLayerContentBounds(layerId: string): { x: number, y: number, w: number, h: number } | null {
     const canvas = this.canvasLayers.get(layerId);
     const ctx = this.ctxs.get(layerId);

@@ -442,10 +442,10 @@ export const WorkspaceLayout: React.FC = () => {
           
           <div className="flex-1"></div> {/* Spacer */}
           
-          {/* Segmented Control for Workspaces */}
+        {/* Segmented Control for Workspaces */}
           <div className="flex bg-bg-input p-1 rounded-lg border border-border-subtle relative">
             <button 
-              className={`relative px-4 sm:px-6 py-1.5 rounded-md text-[11px] font-semibold tracking-wide transition-all duration-300 z-10 ${
+              className={`flex-1 relative px-4 sm:px-6 py-1.5 rounded-md text-[11px] font-semibold tracking-wide transition-all duration-300 z-10 ${
                 workspace === 'MODELING' ? 'text-text-primary' : 'text-text-muted hover:text-text-secondary'
               }`}
               onClick={() => setWorkspace('MODELING')}
@@ -453,7 +453,7 @@ export const WorkspaceLayout: React.FC = () => {
               Modeling
             </button>
             <button 
-              className={`relative px-4 sm:px-6 py-1.5 rounded-md text-[11px] font-semibold tracking-wide transition-all duration-300 z-10 ${
+              className={`flex-1 relative px-4 sm:px-6 py-1.5 rounded-md text-[11px] font-semibold tracking-wide transition-all duration-300 z-10 ${
                 workspace === 'PAINTING' ? 'text-text-primary' : 'text-text-muted hover:text-text-secondary'
               }`}
               onClick={() => setWorkspace('PAINTING')}
@@ -462,7 +462,7 @@ export const WorkspaceLayout: React.FC = () => {
             </button>
             {/* Sliding background pill */}
             <div 
-              className="absolute top-1 bottom-1 w-1/2 bg-bg-panel shadow-sm border border-border-subtle rounded-md transition-transform duration-300 ease-out z-0"
+              className="absolute left-1 top-1 bottom-1 w-[calc(50%-4px)] bg-bg-panel shadow-sm border border-border-subtle rounded-md transition-transform duration-300 ease-out z-0"
               style={{ transform: workspace === 'PAINTING' ? 'translateX(100%)' : 'translateX(0%)' }}
             />
           </div>

@@ -20,11 +20,11 @@ export const InspectorPanel: React.FC = () => {
 
   useGSAP(() => {
     gsap.from(panelRef.current, {
-      x: 20,
+      x: 40,
       opacity: 0,
-      ease: 'power2.out',
-      duration: 0.4,
-      delay: 0.15
+      ease: 'expo.out', // Snappier panel reveal
+      duration: 0.8,
+      delay: 0.1
     });
   }, { scope: panelRef });
   
@@ -433,8 +433,10 @@ const TwoDControls = () => {
     });
   }, []);
 
-  return (
+    return (
     <div ref={containerRef} className="flex flex-col">
+      <NavigatorWindow /> {/* <-- Add it right here at the top of 2D Controls */}
+
       <Accordion title="Precision Tools">
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2 mb-3">
@@ -683,11 +685,12 @@ const LayerItemNode = ({ layer, allLayers, depth = 0 }: any) => {
   const { contextSafe } = useGSAP({ scope: itemRef });
 
   const onMouseEnter = contextSafe(() => {
-    gsap.to(itemRef.current, { scale: 1.02, duration: 0.2, ease: 'back.out(1.5)' });
+    // Added a slight x offset to make it feel like picking up a card
+    gsap.to(itemRef.current, { x: 4, scale: 1.02, duration: 0.3, ease: 'back.out(2)' });
   });
 
   const onMouseLeave = contextSafe(() => {
-    gsap.to(itemRef.current, { scale: 1, duration: 0.2, ease: 'power2.out' });
+    gsap.to(itemRef.current, { x: 0, scale: 1, duration: 0.3, ease: 'power3.out' });
   });
 
   const children = allLayers
@@ -881,5 +884,97 @@ const LayerItemNode = ({ layer, allLayers, depth = 0 }: any) => {
         </div>
       )}
     </div>
+  );
+};
+
+// ADD AT THE BOTTOM OF InspectorPanel.tsx
+
+const NavigatorWindow: React.FC = () => {
+  const { projectConfig, pan, zoom, setPan, globalUpdateTick } = useCanvasStore();
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  
+  // Render composite miniature on updates
+  React.useEffect(() => {
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx || !canvasRef.current) return;
+    const engine = StudioEngine.getInstance();
+    const composite = engine.getCompositeCanvas(true);
+    if (composite) {
+      canvasRef.current.width = composite.width;
+      canvasRef.current.height = composite.height;
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      ctx.drawImage(composite, 0, 0);
+    }
+  }, [globalUpdateTick, projectConfig, pan, zoom]);
+
+  const handleDrag = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.buttons !== 1) return; // Only process left-click drag
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const u = (e.clientX - rect.left) / rect.width;
+    const v = (e.clientY - rect.top) / rect.height;
+
+    const targetX = u * projectConfig.width;
+    const targetY = v * projectConfig.height;
+
+    // Grab actual DOM dimension for the workspace wrapper, fallback to standard sizing
+    const viewport = document.querySelector('.gsap-canvas')?.parentElement?.parentElement;
+    const vw = viewport?.clientWidth || window.innerWidth - 320;
+    const vh = viewport?.clientHeight || window.innerHeight;
+
+    setPan({
+      x: (vw / 2) - (targetX * zoom),
+      y: (vh / 2) - (targetY * zoom)
+    });
+  };
+
+  const aspect = projectConfig.width / projectConfig.height;
+
+  return (
+    <Accordion title="Navigator" defaultExpanded={true}>
+      <div className="w-full flex items-center justify-center bg-[#1a1a1f] rounded border border-border-subtle p-2 mb-2">
+        <div 
+          className="relative cursor-move shadow-md bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjMWExYTFmIi8+CjxyZWN0IHg9IjQiIHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiMyMjIyMjgiLz4KPHJlY3QgeT0iNCIgd2lkdGg9IjQiIGhlaWdodD0iNCIgZmlsbD0iIzIyMjIyOCIvPgo8cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjMWExYTFmIi8+Cjwvc3ZnPg==')] overflow-hidden"
+          style={{
+            width: aspect >= 1 ? '100%' : `${aspect * 100}%`,
+            aspectRatio: `${projectConfig.width} / ${projectConfig.height}`
+          }}
+          onMouseMove={handleDrag}
+          onMouseDown={handleDrag}
+        >
+          <canvas ref={canvasRef} className="w-full h-full pointer-events-none object-contain" />
+          <ViewportBox />
+        </div>
+      </div>
+    </Accordion>
+  );
+};
+
+const ViewportBox: React.FC = () => {
+  const { projectConfig, pan, zoom } = useCanvasStore();
+  const viewport = document.querySelector('.gsap-canvas')?.parentElement?.parentElement;
+  
+  const vw = viewport?.clientWidth || window.innerWidth - 320;
+  const vh = viewport?.clientHeight || window.innerHeight;
+
+  const scaleX = 100 / projectConfig.width;
+  const scaleY = 100 / projectConfig.height;
+
+  const viewX = (-pan.x / zoom) * scaleX;
+  const viewY = (-pan.y / zoom) * scaleY;
+  const viewW = ((vw / zoom) / projectConfig.width) * 100;
+  const viewH = ((vh / zoom) / projectConfig.height) * 100;
+
+  return (
+    <div 
+      className="absolute border border-accent pointer-events-none"
+      style={{
+        left: `${Math.max(0, viewX)}%`,
+        top: `${Math.max(0, viewY)}%`,
+        width: `${Math.min(100, viewW)}%`,
+        height: `${Math.min(100, viewH)}%`,
+        boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)' // Darkens canvas outside the viewport
+      }}
+    />
   );
 };
