@@ -117,27 +117,29 @@ export const WorkspaceLayout: React.FC = () => {
     }
   };
 
-  useGSAP(() => {
-    gsap.from('.gsap-toolbar .gsap-tool-btn', {
+    useGSAP(() => {
+    // FIX: Animate the entire toolbar container instead of individual buttons
+    // to prevent clashing with Tailwind's transition-all utility.
+    gsap.from('.gsap-toolbar', {
       x: -20,
       opacity: 0,
-      stagger: 0.05,
-      ease: 'power2.out',
+      ease: 'power3.out',
+      duration: 0.5,
       delay: 0.1
     });
 
     gsap.from('.gsap-topbar', {
       y: -20,
       opacity: 0,
-      ease: 'power2.out',
-      duration: 0.4
+      ease: 'power3.out',
+      duration: 0.5
     });
 
     gsap.from('.gsap-canvas', {
       scale: 0.98,
       opacity: 0,
       ease: 'power2.out',
-      duration: 0.5,
+      duration: 0.6,
       delay: 0.2
     });
   }, { scope: layoutRef });
@@ -364,45 +366,43 @@ export const WorkspaceLayout: React.FC = () => {
       
       <BrushCursorOverlay />
 
-      <div className="gsap-topbar h-14 bg-bg-panel border-b border-border-subtle flex items-center px-6 justify-between select-none z-30 shadow-md">
-        <div className="flex items-center gap-6">
-          <div className="font-display font-medium tracking-wide uppercase text-sm flex items-center gap-3 text-neutral-100">
-            <img src="/marisopa.png" alt="Veil Studio Logo" className="w-8 h-8 object-contain" />
-            <span className="w-2.5 h-2.5 rounded-full bg-white opacity-90 shadow-[0_0_12px_rgba(255,255,255,0.7)]"></span>
+      {/* TOP NAVIGATION BAR */}
+      <div className="gsap-topbar h-14 bg-bg-panel/95 backdrop-blur-md border-b border-border-subtle flex items-center px-4 sm:px-6 justify-between select-none z-30 shadow-sm">
+        <div className="flex items-center gap-4 sm:gap-6 w-full">
+          
+          {/* Logo Area */}
+          <div className="font-display font-medium tracking-wide uppercase text-sm flex items-center gap-3 text-text-primary">
+            <div className="relative">
+              <img src="/marisopa.png" alt="Veil Studio Logo" className="w-7 h-7 object-contain relative z-10" />
+              <div className="absolute inset-0 bg-accent/20 blur-md rounded-full scale-150"></div>
+            </div>
             Veil Studio
-            <span className="text-[9px] font-normal tracking-widest text-text-muted ml-2 mt-0.5 opacity-80">
-              {autoSaveStatus === 'saved' && '✓ SAVED'}
+            <span className={`text-[9px] font-bold tracking-widest px-2 py-0.5 rounded-full ml-1 flex items-center gap-1 ${
+              autoSaveStatus === 'saved' ? 'bg-green-500/10 text-green-500' : 
+              autoSaveStatus === 'saving' ? 'bg-blue-500/10 text-blue-500' : 
+              'bg-yellow-500/10 text-yellow-500'
+            }`}>
+              {autoSaveStatus === 'saved' && 'SAVED'}
               {autoSaveStatus === 'saving' && 'SAVING...'}
               {autoSaveStatus === 'dirty' && 'UNSAVED'}
             </span>
           </div>
 
+          {/* File Menu */}
           <div className="relative file-menu-container flex items-center h-full">
             <button 
-              className="text-[10px] font-semibold uppercase tracking-widest text-text-secondary hover:text-text-primary px-3 py-1.5 rounded-sm transition border border-border-subtle hover:border-border-strong bg-bg-input flex items-center gap-1.5"
+              className={`text-[11px] font-medium tracking-wide px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${fileMenuOpen ? 'bg-bg-active text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'}`}
               onClick={() => setFileMenuOpen(!fileMenuOpen)}
             >
-              FILE <ChevronDown size={12} className={`transition-transform ${fileMenuOpen ? 'rotate-180' : ''}`} />
+              File <ChevronDown size={14} className={`transition-transform duration-300 ${fileMenuOpen ? 'rotate-180 text-text-primary' : 'text-text-muted'}`} />
             </button>
-            <input 
-              type="file" 
-              accept=".json" 
-              ref={fileInputRef} 
-              onChange={handleImportProject}
-              className="hidden" 
-            />
-            <input 
-              type="file" 
-              accept="image/png, image/jpeg, image/jpg" 
-              ref={imageInputRef} 
-              onChange={handleImageImport}
-              className="hidden" 
-            />
+            <input type="file" accept=".json" ref={fileInputRef} onChange={handleImportProject} className="hidden" />
+            <input type="file" accept="image/png, image/jpeg, image/jpg" ref={imageInputRef} onChange={handleImageImport} className="hidden" />
+            
+            {/* Dropdown with Glassmorphism */}
             {fileMenuOpen && (
-              <div className="absolute top-10 left-0 w-48 bg-bg-panel border border-border-subtle rounded-md shadow-2xl py-1 z-50 overflow-hidden">
-                <button 
-                  className="w-full text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-red-400 hover:text-red-300 hover:bg-red-500/10 transition flex items-center gap-2 group"
-                  onClick={async () => {
+              <div className="absolute top-12 left-0 w-56 glass-panel rounded-xl py-1.5 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                <button onClick={async () => {
                     setFileMenuOpen(false);
                     if (confirm('Are you sure you want to start a new project? This will clear your current progress.')) {
                       const { del } = await import('idb-keyval');
@@ -410,94 +410,80 @@ export const WorkspaceLayout: React.FC = () => {
                       window.location.reload();
                     }
                   }}
+                  className="w-full text-left px-4 py-2 text-[11px] font-medium tracking-wide text-red-500 hover:bg-red-500/10 transition flex items-center gap-2.5 group"
                 >
-                  <FilePlus size={12} className="text-red-500 group-hover:text-red-400" /> New Project
+                  <FilePlus size={14} className="group-hover:scale-110 transition-transform" /> New Project
                 </button>
-                <div className="h-px w-full bg-bg-hover my-1"></div>
-                <button 
-                  className="w-full text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-text-secondary hover:text-text-primary hover:bg-bg-input transition flex items-center gap-2 group"
-                  onClick={() => {
-                    setFileMenuOpen(false);
-                    fileInputRef.current?.click();
-                  }}
+                <div className="h-px w-full bg-border-subtle my-1"></div>
+                <button onClick={() => { setFileMenuOpen(false); fileInputRef.current?.click(); }}
+                  className="w-full text-left px-4 py-2 text-[11px] font-medium tracking-wide text-text-secondary hover:text-text-primary hover:bg-bg-hover transition flex items-center gap-2.5 group"
                 >
-                  <Upload size={12} className="text-text-muted group-hover:text-text-secondary" /> Import Project
+                  <Upload size={14} className="text-text-muted group-hover:text-text-primary group-hover:scale-110 transition-all" /> Import Project
                 </button>
-                <button 
-                  className="w-full text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-text-secondary hover:text-text-primary hover:bg-bg-input transition flex items-center gap-2 group"
-                  onClick={() => {
-                    setFileMenuOpen(false);
-                    imageInputRef.current?.click();
-                  }}
+                <button onClick={() => { setFileMenuOpen(false); imageInputRef.current?.click(); }}
+                  className="w-full text-left px-4 py-2 text-[11px] font-medium tracking-wide text-text-secondary hover:text-text-primary hover:bg-bg-hover transition flex items-center gap-2.5 group"
                 >
-                  <ImageIcon size={12} className="text-text-muted group-hover:text-text-secondary" /> Import Image Layer
+                  <ImageIcon size={14} className="text-text-muted group-hover:text-text-primary group-hover:scale-110 transition-all" /> Import Image Layer
                 </button>
-                <button 
-                  className="w-full text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-text-secondary hover:text-text-primary hover:bg-bg-input transition flex items-center gap-2 group"
-                  onClick={() => {
-                    setFileMenuOpen(false);
-                    ExportService.exportProjectJSON();
-                  }}
+                <button onClick={() => { setFileMenuOpen(false); ExportService.exportProjectJSON(); }}
+                  className="w-full text-left px-4 py-2 text-[11px] font-medium tracking-wide text-text-secondary hover:text-text-primary hover:bg-bg-hover transition flex items-center gap-2.5 group"
                 >
-                  <Save size={12} className="text-text-muted group-hover:text-text-secondary" /> Export Project
+                  <Save size={14} className="text-text-muted group-hover:text-text-primary group-hover:scale-110 transition-all" /> Export Project
                 </button>
-                <div className="h-px w-full bg-bg-hover my-1"></div>
-                <button 
-                  className="w-full text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-text-secondary hover:text-text-primary hover:bg-bg-input transition flex items-center gap-2 group"
-                  onClick={() => {
-                    setFileMenuOpen(false);
-                    ExportService.exportCompositePNG();
-                  }}
+                <div className="h-px w-full bg-border-subtle my-1"></div>
+                <button onClick={() => { setFileMenuOpen(false); ExportService.exportCompositePNG(); }}
+                  className="w-full text-left px-4 py-2 text-[11px] font-medium tracking-wide text-text-secondary hover:text-text-primary hover:bg-bg-hover transition flex items-center gap-2.5 group"
                 >
-                  <Download size={12} className="text-text-muted group-hover:text-text-secondary" /> Export PNG
+                  <Download size={14} className="text-text-muted group-hover:text-text-primary group-hover:scale-110 transition-all" /> Export PNG
                 </button>
               </div>
             )}
           </div>
           
-          <div className="h-5 w-px bg-bg-hover"></div>
+          <div className="flex-1"></div> {/* Spacer */}
           
-          <div className="flex gap-1.5 bg-bg-app p-1.5 rounded-md border border-border-subtle">
+          {/* Segmented Control for Workspaces */}
+          <div className="flex bg-bg-input p-1 rounded-lg border border-border-subtle relative">
             <button 
-              className={`px-3 sm:px-5 py-1.5 rounded-sm text-[10px] sm:text-[11px] font-semibold uppercase tracking-widest transition-all ${
-                workspace === 'MODELING' ? 'bg-bg-hover text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary hover:bg-bg-input'
+              className={`relative px-4 sm:px-6 py-1.5 rounded-md text-[11px] font-semibold tracking-wide transition-all duration-300 z-10 ${
+                workspace === 'MODELING' ? 'text-text-primary' : 'text-text-muted hover:text-text-secondary'
               }`}
               onClick={() => setWorkspace('MODELING')}
             >
               Modeling
             </button>
             <button 
-              className={`px-3 sm:px-5 py-1.5 rounded-sm text-[10px] sm:text-[11px] font-semibold uppercase tracking-widest transition-all ${
-                workspace === 'PAINTING' ? 'bg-bg-hover text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary hover:bg-bg-input'
+              className={`relative px-4 sm:px-6 py-1.5 rounded-md text-[11px] font-semibold tracking-wide transition-all duration-300 z-10 ${
+                workspace === 'PAINTING' ? 'text-text-primary' : 'text-text-muted hover:text-text-secondary'
               }`}
               onClick={() => setWorkspace('PAINTING')}
             >
               Painting
             </button>
+            {/* Sliding background pill */}
+            <div 
+              className="absolute top-1 bottom-1 w-1/2 bg-bg-panel shadow-sm border border-border-subtle rounded-md transition-transform duration-300 ease-out z-0"
+              style={{ transform: workspace === 'PAINTING' ? 'translateX(100%)' : 'translateX(0%)' }}
+            />
           </div>
           
-          <div className="flex gap-1">
-            <button 
-              onClick={toggleTheme}
-              className="p-2 rounded-md bg-bg-input border border-border-subtle text-text-secondary hover:text-text-primary transition"
-              title="Toggle Theme"
-            >
+          {/* Action Icons */}
+          <div className="flex gap-2 ml-2">
+            <button onClick={toggleTheme} className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-hover transition-all duration-200" title="Toggle Theme">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button 
-              onClick={() => setInspectorOpen(!inspectorOpen)}
-              className="p-2 rounded-md bg-bg-input border border-border-subtle text-text-secondary hover:text-text-primary transition"
-              title="Toggle Inspector"
-            >
+            <button onClick={() => setInspectorOpen(!inspectorOpen)} className={`p-2 rounded-lg transition-all duration-200 ${inspectorOpen ? 'bg-bg-active text-text-primary' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`} title="Toggle Inspector">
               <PanelRight size={18} />
             </button>
           </div>
+
         </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="gsap-toolbar w-16 bg-bg-panel border-r border-border-subtle flex flex-col items-center py-5 gap-5 z-10 shadow-xl relative">
-          <div className="flex flex-col gap-3">
+          {/* FLOATING LEFT TOOLBAR */}
+         <div className="gsap-toolbar w-14 my-4 ml-4 glass-panel rounded-2xl flex flex-col items-center py-4 gap-3 z-20 absolute left-0 top-14 bottom-4 overflow-y-auto custom-scrollbar">
+          <div className="flex flex-col gap-2 w-full px-2">
             
             {workspace === 'MODELING' && (
               <>
@@ -507,7 +493,7 @@ export const WorkspaceLayout: React.FC = () => {
                 <ToolButton icon={<Maximize size={18} />} id="SCALE" active={tool === 'SCALE'} onClick={() => setTool('SCALE')} tooltip="Scale Node (S)" />
                 <ToolButton icon={<BoxSelect size={18} />} id="TRANSFORM_GIZMO" active={tool === 'TRANSFORM_GIZMO'} onClick={() => setTool('TRANSFORM_GIZMO')} tooltip="Universal Gizmo (Y)" />
                 
-                <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
+                <div className="w-full h-px bg-border-subtle my-1"></div>
                 <ToolButton icon={<Focus size={18} />} id="RESET_CAMERA" active={false} onClick={triggerCameraReset} tooltip="Reset Camera" />
               </>
             )}
@@ -516,20 +502,21 @@ export const WorkspaceLayout: React.FC = () => {
               <>
                 <ToolButton icon={<Move size={18} />} id="MOVE_2D" active={tool === 'MOVE_2D'} onClick={() => setTool('MOVE_2D')} tooltip="Move & Transform (V)" />
                 <ToolButton icon={<MousePointerSquareDashed size={18} />} id="SELECT_2D" active={tool === 'SELECT_2D'} onClick={() => setTool('SELECT_2D')} tooltip="Paint Selection (M)" />
-                <ToolButton icon={<Pen size={18} />} id="BRUSH" active={tool === 'BRUSH'} onClick={() => setTool('BRUSH')} tooltip="Paint Brush (B)" />                <ToolButton icon={<Eraser size={18} />} id="ERASER" active={tool === 'ERASER'} onClick={() => setTool('ERASER')} tooltip="Eraser (E)" />
+                <ToolButton icon={<Pen size={18} />} id="BRUSH" active={tool === 'BRUSH'} onClick={() => setTool('BRUSH')} tooltip="Paint Brush (B)" />                
+                <ToolButton icon={<Eraser size={18} />} id="ERASER" active={tool === 'ERASER'} onClick={() => setTool('ERASER')} tooltip="Eraser (E)" />
                 <ToolButton icon={<Pipette size={18} />} id="EYEDROPPER" active={tool === 'EYEDROPPER'} onClick={() => setTool('EYEDROPPER')} tooltip="Eyedropper (I)" />
                 <ToolButton icon={<PaintBucket size={18} />} id="BUCKET" active={tool === 'BUCKET'} onClick={() => setTool('BUCKET')} tooltip="Fill Bucket (G)" />
                 
-                    <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>                
+                <div className="w-full h-px bg-border-subtle my-1"></div>                
                 
                 <ToolButton icon={<Square size={18} />} id="SHAPE_RECT" active={tool === 'SHAPE_RECT'} onClick={() => setTool('SHAPE_RECT')} tooltip="Rectangle Shape (U)" />
                 <ToolButton icon={<Circle size={18} />} id="SHAPE_CIRCLE" active={tool === 'SHAPE_CIRCLE'} onClick={() => setTool('SHAPE_CIRCLE')} tooltip="Circle Shape (C)" />
                 <ToolButton icon={<Minus size={18} />} id="SHAPE_LINE" active={tool === 'SHAPE_LINE'} onClick={() => setTool('SHAPE_LINE')} tooltip="Line Tool (L)" />
 
-                <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
+                <div className="w-full h-px bg-border-subtle my-1"></div>
                 
                 <ToolButton icon={<Hand size={18} />} id="PAN" active={tool === 'PAN'} onClick={() => setTool('PAN')} tooltip="Pan Canvas (H / Space)" />
-                <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
+                <div className="w-full h-px bg-border-subtle my-1"></div>
                 <ToolButton icon={<Focus size={18} />} id="RESET_CANVAS" active={false} onClick={() => {
                   const state = useCanvasStore.getState();
                   const container = viewportRef.current;
@@ -560,9 +547,10 @@ export const WorkspaceLayout: React.FC = () => {
 
           <div 
             ref={viewportRef}
-            className="flex-1 overflow-hidden relative select-none"
+            className="flex-1 overflow-hidden relative select-none z-0"
             style={{
-              backgroundImage: `radial-gradient(#222228 1px, transparent 1px)`,
+              /* Adaptive grid using CSS variables */
+              backgroundImage: `radial-gradient(var(--color-border-strong) 1px, transparent 1px)`,
               backgroundSize: `40px 40px`,
               backgroundPosition: `${pan.x % 40}px ${pan.y % 40}px`
             }}
@@ -579,7 +567,7 @@ export const WorkspaceLayout: React.FC = () => {
               className="absolute left-0 top-0"
             >
               <div 
-                className="gsap-canvas relative shadow-[0_0_80px_rgba(0,0,0,0.8)] z-0 ring-1 ring-[#33333C] shrink-0 w-full h-full"
+                className="gsap-canvas relative shadow-[0_20px_60px_rgba(0,0,0,0.5)] z-0 ring-1 ring-border-subtle shrink-0 w-full h-full transition-shadow duration-300"
                 style={{ backgroundColor }}
               >
                 <ReferenceViewer />
@@ -626,17 +614,24 @@ export const WorkspaceLayout: React.FC = () => {
           {isSpritesheetMode && <AnimationToolbar />}
 
         </div>
-
+  
+        {/* RIGHT INSPECTOR PANEL */}
         <div className={`
-          absolute lg:relative right-0 top-0 bottom-0 z-50 
-          transform transition-all duration-300 ease-in-out
-          ${inspectorOpen ? 'translate-x-0 w-80 outline outline-1 outline-[#222228] lg:outline-none shadow-[-20px_0_40px_rgba(0,0,0,0.5)] lg:shadow-none' : 'translate-x-full lg:translate-x-0 lg:w-0 lg:min-w-0 overflow-hidden'}
-          h-full bg-bg-panel
+          absolute lg:relative right-0 top-0 bottom-0 z-40 
+          transform transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]
+          ${inspectorOpen ? 'translate-x-0 w-80 shadow-[-20px_0_40px_rgba(0,0,0,0.2)] lg:shadow-none' : 'translate-x-full lg:translate-x-0 lg:w-0 lg:min-w-0 overflow-hidden'}
+          h-full bg-bg-panel/95 backdrop-blur-md border-l border-border-subtle
         `}>
-          <div className="w-80 h-full">
+          <div className="w-80 h-full overflow-y-auto custom-scrollbar">
             <InspectorPanel />
           </div>
         </div>
+        
+        {/* Mobile Overlay */}
+        <div 
+          className={`fixed inset-0 bg-black/50 backdrop-blur-sm z-30 lg:hidden transition-opacity duration-300 ${inspectorOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+          onClick={() => setInspectorOpen(false)}
+        ></div>
         
         {inspectorOpen && (
           <div 
@@ -654,12 +649,17 @@ const ToolButton = ({ icon, active, onClick, tooltip }: any) => (
   <button
     title={tooltip}
     onClick={onClick}
-    className={`gsap-tool-btn w-10 h-10 rounded-md flex items-center justify-center transition-all duration-200 ${
+    className={`gsap-tool-btn relative w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 group ${
       active 
-        ? 'bg-bg-hover text-text-primary shadow-[0_0_15px_rgba(255,255,255,0.05)] ring-1 ring-border-strong' 
-        : 'text-text-muted hover:text-text-secondary hover:bg-bg-input'
+        ? 'bg-bg-active text-text-primary shadow-[0_2px_10px_rgba(0,0,0,0.1)] ring-1 ring-border-strong' 
+        : 'text-text-muted hover:text-text-secondary hover:bg-bg-hover'
     }`}
   >
-    {icon}
+    {/* Active indicator bar */}
+    <div className={`absolute left-0 w-1 h-5 bg-accent rounded-r-full transition-all duration-300 ${active ? 'opacity-100 scale-100 shadow-[0_0_8px_var(--color-accent)]' : 'opacity-0 scale-50'}`} />
+    
+    <div className={`transform transition-transform duration-200 ${active ? 'scale-100' : 'group-hover:scale-110'}`}>
+      {icon}
+    </div>
   </button>
 );

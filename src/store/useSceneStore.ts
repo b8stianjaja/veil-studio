@@ -41,9 +41,11 @@ export const useSceneStore = create<SceneState>((set) => ({
   camera: {
     type: 'PERSPECTIVE',
     fov: 50,
+    near: 0.1,
+    far: 2000,
     locked: false,
-    position: [5, 5, 5],
-    target: [0, 0, 0],
+    position: [5, 5, 5] as [number, number, number],
+    target: [0, 0, 0] as [number, number, number],
     zoom: 50
   },
   selectedNodeId: null,

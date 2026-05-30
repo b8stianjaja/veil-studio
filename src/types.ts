@@ -43,6 +43,8 @@ export interface EnvironmentConfig {
 export interface CameraConfig {
   type: 'PERSPECTIVE' | 'ORTHOGRAPHIC';
   fov: number;
+  near?: number;
+  far?: number;
   locked: boolean;
   position: [number, number, number];
   target: [number, number, number];

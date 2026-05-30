@@ -68,9 +68,10 @@ interface CanvasState {
 const initialLayerId = uuidv4();
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
-  workspace: 'PAINTING',
+  workspace: 'MODELING', 
   theme: 'dark',
-  tool: 'BRUSH',
+  tool: 'ORBIT', // ORBIT is the default tool for MODELING
+  
   layers: [
     { id: initialLayerId, order: 0, visible: true, opacity: 1, name: 'Layer 1', locked: false, blendMode: 'normal', type: 'LAYER', parentId: null }
   ],
@@ -254,8 +255,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   restoreState: (layers, backgroundColor, isSpritesheet) => set(state => ({ 
     layers, 
     activeLayerId: layers.length > 0 ? [...layers].sort((a,b) => b.order - a.order)[0].id : null,
-    workspace: 'PAINTING',
-    tool: 'BRUSH',
+    
+    // FIX: Boot into Modeling workspace on restore to ensure canvas stability
+    workspace: 'MODELING',
+    tool: 'ORBIT',
+    
     backgroundColor: backgroundColor || 'transparent',
     isSpritesheetMode: isSpritesheet ?? false,
     globalUpdateTick: state.globalUpdateTick + 1

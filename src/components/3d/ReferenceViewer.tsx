@@ -19,43 +19,33 @@ const EngineBridge = () => {
 };
 
 // Replaces the old static handler with a robust dynamic Camera Rig
+// Replaces the old static handler with a robust declarative Camera Rig
 const CameraRig: React.FC = () => {
   const { camera: cameraState, cameraResetTick, cameraSaveTick, updateCamera } = useSceneStore();
   const { workspace, tool } = useCanvasStore();
   const controlsRef = useRef<any>(null);
   const { camera } = useThree();
 
-  // 1. Initial configuration & Resets based on stored coordinates
+  // 1. Explicit Reset Trigger (Fires only when the user clicks the "Reset Camera" tool)
   useEffect(() => {
-    if (cameraResetTick >= 0 && !cameraState.locked) {
-      camera.position.set(...cameraState.position);
+    if (cameraResetTick > 0 && !cameraState.locked) {
+      camera.position.set(5, 5, 5);
       
       if (cameraState.type === 'ORTHOGRAPHIC') {
-         (camera as THREE.OrthographicCamera).zoom = cameraState.zoom;
+         (camera as THREE.OrthographicCamera).zoom = 50;
+         camera.updateProjectionMatrix();
       }
       
-      camera.lookAt(...cameraState.target);
-      camera.updateProjectionMatrix();
-
       if (controlsRef.current) {
-        controlsRef.current.target.set(...cameraState.target);
+        controlsRef.current.target.set(0, 0, 0);
         controlsRef.current.update();
       }
     }
-  }, [cameraResetTick, cameraState.type]);
+  }, [cameraResetTick]);
 
-  // 2. Dynamic FOV Syncing
+  // 2. Save physical coordinates to Zustand on demand (For Auto-save & Export)
   useEffect(() => {
-    if (cameraState.type === 'PERSPECTIVE' && (camera as any).isPerspectiveCamera) {
-      (camera as THREE.PerspectiveCamera).fov = cameraState.fov;
-      camera.updateProjectionMatrix();
-    }
-  }, [cameraState.fov, cameraState.type, camera]);
-
-  // 3. Save exact physical coordinates to Zustand on demand
-    useEffect(() => {
     if (cameraSaveTick > 0) {
-      // Explicitly construct the tuple to satisfy TypeScript
       const pos: [number, number, number] = [
         camera.position.x, 
         camera.position.y, 
@@ -81,16 +71,31 @@ const CameraRig: React.FC = () => {
 
   return (
     <>
+      {/* Declarative Camera Mounting ensures instant property inheritance */}
       {cameraState.type === 'PERSPECTIVE' ? (
-        <PerspectiveCamera makeDefault />
+        <PerspectiveCamera 
+          makeDefault 
+          position={cameraState.position}
+          fov={cameraState.fov}
+          near={cameraState.near}
+          far={cameraState.far}
+        />
       ) : (
-        <OrthographicCamera makeDefault />
+        <OrthographicCamera 
+          makeDefault 
+          position={cameraState.position}
+          zoom={cameraState.zoom}
+          near={cameraState.near}
+          far={cameraState.far}
+        />
       )}
 
+      {/* OrbitControls connects to the makeDefault camera automatically */}
       {workspace === 'MODELING' && (
         <OrbitControls
           ref={controlsRef}
           makeDefault
+          target={cameraState.target}
           enabled={!cameraState.locked}
           enableRotate={isOrbitTool && !cameraState.locked}
           enablePan={isOrbitTool && !cameraState.locked}
