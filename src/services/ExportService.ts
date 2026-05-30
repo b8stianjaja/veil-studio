@@ -34,9 +34,13 @@ export class ExportService {
         StudioEngine.getInstance().resizeAllLayers(project.canvas.width, project.canvas.height);
       }
       
-      // Delaying the restore slightly ensures the DOM has resized if the canvas config changed above
+      // Delaying the restore slightly ensures the DOM has resized
       setTimeout(() => {
-        useCanvasStore.getState().restoreState(project.layers, project.canvas?.backgroundColor);
+        useCanvasStore.getState().restoreState(
+          project.layers, 
+          project.canvas?.backgroundColor,
+          project.canvas?.isSpritesheetMode // FIX: Was previously missing, causing spritesheets to break!
+        );
       }, 50);
       
     } catch (e) {
@@ -45,7 +49,6 @@ export class ExportService {
     }
   }
 
-  // ADDED: Handles importing images (PNG, JPG) as new manipulable layers
   static importImage(file: File) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -55,17 +58,18 @@ export class ExportService {
       const state = useCanvasStore.getState();
       state.addLayer();
       
-      // A slight delay is needed to allow React to mount the new LayerCanvas component
-      setTimeout(() => {
-        const activeId = useCanvasStore.getState().activeLayerId;
-        if (activeId) {
-          useCanvasStore.getState().updateLayer(activeId, { 
-            name: file.name.replace(/\.[^/.]+$/, ""), 
-            buffer: dataUrl 
-          });
+      const activeId = useCanvasStore.getState().activeLayerId;
+      if (activeId) {
+        useCanvasStore.getState().updateLayer(activeId, { 
+          name: file.name.replace(/\.[^/.]+$/, ""), 
+          buffer: dataUrl 
+        });
+        
+        // Wait for React to map the new canvas to the DOM before restoring buffer
+        setTimeout(() => {
           StudioEngine.getInstance().restoreLayerBuffer(activeId, dataUrl);
-        }
-      }, 100);
+        }, 100);
+      }
     };
     reader.readAsDataURL(file);
   }

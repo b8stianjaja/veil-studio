@@ -237,7 +237,8 @@ const LayerCanvas: React.FC<{ layer: any, zIndex: number, visible: boolean, opac
     return () => {
       StudioEngine.getInstance().removeLayer(layer.id);
     };
-  }, [layer.id, layer.buffer]);
+    // FIX: Removed layer.buffer from the dependency array to prevent unmount loops
+  }, [layer.id]);
 
   return (
     <motion.canvas

@@ -12,7 +12,8 @@ import { ExportService } from '../../services/ExportService';
 import { 
   Pen, Move3d, MousePointer2, Eraser, Focus, Maximize, RotateCw, Hand, 
   PanelRight, ChevronDown, Download, Upload, Save, FilePlus, Sun, Moon,
-  Pipette, PaintBucket, Square, Circle, Minus, BoxSelect, Image as ImageIcon, Move
+  Pipette, PaintBucket, Square, Circle, Minus, BoxSelect, Image as ImageIcon, Move,
+  MousePointerSquareDashed // ADD THIS ICON FOR SELECTION BRUSH
 } from 'lucide-react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -179,6 +180,7 @@ export const WorkspaceLayout: React.FC = () => {
         if (key === 'e') state.setTool('ERASER');
         if (key === 'h') state.setTool('PAN');
         if (key === 'v') state.setTool('MOVE_2D');
+        if (key === 'm') state.setTool('SELECT_2D');
         if (key === 'i') state.setTool('EYEDROPPER');
         if (key === 'g') state.setTool('BUCKET');
         if (key === 'u') state.setTool('SHAPE_RECT');
@@ -513,12 +515,12 @@ export const WorkspaceLayout: React.FC = () => {
             {workspace === 'PAINTING' && (
               <>
                 <ToolButton icon={<Move size={18} />} id="MOVE_2D" active={tool === 'MOVE_2D'} onClick={() => setTool('MOVE_2D')} tooltip="Move & Transform (V)" />
-                <ToolButton icon={<Pen size={18} />} id="BRUSH" active={tool === 'BRUSH'} onClick={() => setTool('BRUSH')} tooltip="Paint Brush (B)" />
-                <ToolButton icon={<Eraser size={18} />} id="ERASER" active={tool === 'ERASER'} onClick={() => setTool('ERASER')} tooltip="Eraser (E)" />
+                <ToolButton icon={<MousePointerSquareDashed size={18} />} id="SELECT_2D" active={tool === 'SELECT_2D'} onClick={() => setTool('SELECT_2D')} tooltip="Paint Selection (M)" />
+                <ToolButton icon={<Pen size={18} />} id="BRUSH" active={tool === 'BRUSH'} onClick={() => setTool('BRUSH')} tooltip="Paint Brush (B)" />                <ToolButton icon={<Eraser size={18} />} id="ERASER" active={tool === 'ERASER'} onClick={() => setTool('ERASER')} tooltip="Eraser (E)" />
                 <ToolButton icon={<Pipette size={18} />} id="EYEDROPPER" active={tool === 'EYEDROPPER'} onClick={() => setTool('EYEDROPPER')} tooltip="Eyedropper (I)" />
                 <ToolButton icon={<PaintBucket size={18} />} id="BUCKET" active={tool === 'BUCKET'} onClick={() => setTool('BUCKET')} tooltip="Fill Bucket (G)" />
                 
-                <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
+                    <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>                
                 
                 <ToolButton icon={<Square size={18} />} id="SHAPE_RECT" active={tool === 'SHAPE_RECT'} onClick={() => setTool('SHAPE_RECT')} tooltip="Rectangle Shape (U)" />
                 <ToolButton icon={<Circle size={18} />} id="SHAPE_CIRCLE" active={tool === 'SHAPE_CIRCLE'} onClick={() => setTool('SHAPE_CIRCLE')} tooltip="Circle Shape (C)" />

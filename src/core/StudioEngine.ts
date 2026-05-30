@@ -1,3 +1,5 @@
+// src/core/StudioEngine.ts
+
 import * as THREE from 'three';
 import { useCanvasStore } from '../store/useCanvasStore';
 import { useAnimationStore } from '../store/useAnimationStore';
@@ -15,7 +17,7 @@ export class StudioEngine {
   private threeCamera: THREE.PerspectiveCamera | null = null;
   private threeScene: THREE.Scene | null = null;
   
-  // FIX 2: Persistent Layer Cache to survive React unmounts during Workspace switches
+  // Persistent Layer Cache to survive React unmounts during Workspace switches
   private layerCache: Map<string, ImageData> = new Map();
 
   private isDrawing: boolean = false;
@@ -107,8 +109,6 @@ export class StudioEngine {
     
     ctx.save();
     
-    // FIX 3: Removed Spritesheet clipping block so the user can draw anywhere freely
-
     const drawPath = (transform?: { scaleX: number, scaleY: number, transX: number, transY: number }) => {
       if (this.currentPath.length < 2) return;
       ctx.beginPath();
@@ -190,7 +190,7 @@ export class StudioEngine {
       ctx.scale(dpr, dpr);
       this.ctxs.set(id, ctx);
 
-      // FIX 2 Implementation: Instantly restore pixel data if React unmounted this canvas previously
+      // Instantly restore pixel data if React unmounted this canvas previously
       const cached = this.layerCache.get(id);
       if (cached) {
         ctx.save();
@@ -228,7 +228,7 @@ export class StudioEngine {
     }
   }
 
-  // --- FIX 1: Overhauled Transform Tool Engine ---
+  // --- Transform Tool Engine ---
   public startMove(x: number, y: number) {
     const state = useCanvasStore.getState();
     if (!state.activeLayerId) return;
@@ -297,6 +297,15 @@ export class StudioEngine {
 
     this.saveHistoryState(state.activeLayerId, ctx.getImageData(0, 0, canvas.width, canvas.height));
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // Enforce physical pixel rendering
+    ctx.drawImage(
+      this.moveSnapshotCanvas, 
+      0, 0, this.moveSnapshotCanvas.width, this.moveSnapshotCanvas.height,
+      sb.x * dpr, sb.y * dpr, sb.w * dpr, sb.h * dpr
+    );
+    ctx.restore();
   }
 
   public continueMove(x: number, y: number, shiftKey: boolean = false) {
@@ -388,13 +397,11 @@ export class StudioEngine {
         break;
     }
 
-    // Absolute rendering logic fixes geometric distortion completely
     const dpr = window.devicePixelRatio || 1;
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform matrix
+    ctx.setTransform(1, 0, 0, 1, 0, 0); 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Draw directly from source to destination to prevent compound scaling errors
     ctx.drawImage(
       this.moveSnapshotCanvas, 
       0, 0, this.moveSnapshotCanvas.width, this.moveSnapshotCanvas.height,
@@ -640,12 +647,17 @@ export class StudioEngine {
 
       const img = new Image();
       img.onload = () => {
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0);
-        ctx.restore();
+        const currentCanvas = this.canvasLayers.get(layerId);
+        const currentCtx = this.ctxs.get(layerId);
+        
+        if (!currentCanvas || !currentCtx || currentCanvas.width === 0 || currentCanvas.height === 0) return resolve();
+
+        currentCtx.save();
+        currentCtx.setTransform(1, 0, 0, 1, 0, 0);
+        currentCtx.globalCompositeOperation = 'source-over';
+        currentCtx.clearRect(0, 0, currentCanvas.width, currentCanvas.height);
+        currentCtx.drawImage(img, 0, 0);
+        currentCtx.restore();
         
         this.updateLayerCache(layerId);
         const state = useCanvasStore.getState();
@@ -777,33 +789,23 @@ export class StudioEngine {
   
   public getLayerContentBounds(layerId: string): { x: number, y: number, w: number, h: number } | null {
     const canvas = this.canvasLayers.get(layerId);
-    if (!canvas) return null;
+    const ctx = this.ctxs.get(layerId);
+    if (!canvas || !ctx) return null;
 
     const width = canvas.width;
     const height = canvas.height;
     
-    if (!this.thumbCanvas) {
-      this.thumbCanvas = document.createElement('canvas');
-    }
-    const scale = 0.05; 
-    const thumbW = Math.max(1, Math.floor(width * scale));
-    const thumbH = Math.max(1, Math.floor(height * scale));
+    // Fetch exact pixel data without downscaling for a 1:1 perfect bounding box
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
 
-    if (this.thumbCanvas.width !== thumbW) this.thumbCanvas.width = thumbW;
-    if (this.thumbCanvas.height !== thumbH) this.thumbCanvas.height = thumbH;
-    
-    const thumbCtx = this.thumbCanvas.getContext('2d', { willReadFrequently: true });
-    if (!thumbCtx) return null;
+    let minX = width, minY = height, maxX = -1, maxY = -1;
 
-    thumbCtx.drawImage(canvas, 0, 0, thumbW, thumbH);
-    const imageData = thumbCtx.getImageData(0, 0, thumbW, thumbH).data;
-
-    let minX = thumbW, minY = thumbH, maxX = -1, maxY = -1;
-
-    for (let y = 0; y < thumbH; y++) {
-      for (let x = 0; x < thumbW; x++) {
-        const alpha = imageData[(y * thumbW + x) * 4 + 3];
-        if (alpha > 5) {
+    // Fast iteration to find exact non-transparent boundaries
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const alpha = data[(y * width + x) * 4 + 3];
+        if (alpha > 5) { // Threshold for anti-aliasing and faint pixels
           if (x < minX) minX = x;
           if (x > maxX) maxX = x;
           if (y < minY) minY = y;
@@ -816,11 +818,12 @@ export class StudioEngine {
 
     const dpr = window.devicePixelRatio || 1;
 
+    // Return the perfect unscaled physical boundaries translated to CSS space
     return {
-      x: Math.max(0, (minX / scale) / dpr),
-      y: Math.max(0, (minY / scale) / dpr),
-      w: ((maxX - minX + 1) / scale) / dpr,
-      h: ((maxY - minY + 1) / scale) / dpr
+      x: minX / dpr,
+      y: minY / dpr,
+      w: (maxX - minX + 1) / dpr,
+      h: (maxY - minY + 1) / dpr
     };
   }
 
