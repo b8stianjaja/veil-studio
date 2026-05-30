@@ -36,8 +36,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "android": {
-      "debugApplicationIdSuffix": ".debug"
+    "windows": {
+      "nsis": {
+        "installerIcon": "./icons/installer-icon.ico",
+        "uninstallerIcon": "./icons/uninstaller-icon.ico",
+        "headerImage": "./icons/header.bmp",
+        "sidebarImage": "./icons/sidebar.bmp",
+        "template": "custom-installer.nsi"
+      }
     }
   }
 }
