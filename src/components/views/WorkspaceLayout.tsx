@@ -12,7 +12,7 @@ import { ExportService } from '../../services/ExportService';
 import { 
   Pen, Move3d, MousePointer2, Eraser, Focus, Maximize, RotateCw, Hand, 
   PanelRight, ChevronDown, Download, Upload, Save, FilePlus, Sun, Moon,
-  Pipette, PaintBucket, Square, Lasso, Cuboid, BoxSelect, Wand2, Droplet, Blend
+  Pipette, PaintBucket, Square, Circle, Minus, BoxSelect, Image as ImageIcon, Move
 } from 'lucide-react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -34,7 +34,7 @@ const BrushCursorOverlay: React.FC = () => {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  if (workspace !== 'PAINTING' || (tool !== 'BRUSH' && tool !== 'ERASER' && tool !== 'SMUDGE' && tool !== 'BLUR')) return null;
+  if (workspace !== 'PAINTING' || (tool !== 'BRUSH' && tool !== 'ERASER')) return null;
 
   const size = brushSize * zoom;
 
@@ -53,11 +53,12 @@ const BrushCursorOverlay: React.FC = () => {
 };
 
 export const WorkspaceLayout: React.FC = () => {
-  const { workspace, setWorkspace, tool, setTool, backgroundColor, autoSaveStatus, theme, toggleTheme, isSpritesheetMode } = useCanvasStore();
+  const { workspace, setWorkspace, tool, setTool, backgroundColor, autoSaveStatus, theme, toggleTheme, isSpritesheetMode, activeLayerBounds, activeLayerId, globalUpdateTick } = useCanvasStore();
   const { triggerCameraReset } = useSceneStore();
   const interceptContainerRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const [inspectorOpen, setInspectorOpen] = useState(window.innerWidth > 1024);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
@@ -66,6 +67,14 @@ export const WorkspaceLayout: React.FC = () => {
   const pan = useCanvasStore((state) => state.pan);
   const zoom = useCanvasStore((state) => state.zoom);
   const localTransform = useRef({ x: pan.x, y: pan.y, z: zoom });
+
+  useEffect(() => {
+    if (tool === 'MOVE_2D' && workspace === 'PAINTING') {
+      StudioEngine.getInstance().updateActiveLayerBounds();
+    } else {
+      useCanvasStore.getState().setActiveLayerBounds(null);
+    }
+  }, [tool, workspace, activeLayerId, globalUpdateTick]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -89,10 +98,19 @@ export const WorkspaceLayout: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [fileMenuOpen]);
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       ExportService.importProjectJSON(file);
+      e.target.value = '';
+      setFileMenuOpen(false);
+    }
+  };
+
+  const handleImageImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      ExportService.importImage(file);
       e.target.value = '';
       setFileMenuOpen(false);
     }
@@ -160,11 +178,13 @@ export const WorkspaceLayout: React.FC = () => {
         if (key === 'b' || key === 'p') state.setTool('BRUSH');
         if (key === 'e') state.setTool('ERASER');
         if (key === 'h') state.setTool('PAN');
+        if (key === 'v') state.setTool('MOVE_2D');
         if (key === 'i') state.setTool('EYEDROPPER');
         if (key === 'g') state.setTool('BUCKET');
         if (key === 'u') state.setTool('SHAPE_RECT');
-        if (key === 'm') state.setTool('SELECT_2D');
-        if (key === 'w') state.setTool('MAGIC_WAND');
+        if (key === 'c') state.setTool('SHAPE_CIRCLE');
+        if (key === 'l') state.setTool('SHAPE_LINE');
+        
         if (key === '[') state.setBrushSettings({ size: Math.max(1, state.brushSize - 2) });
         if (key === ']') state.setBrushSettings({ size: Math.min(100, state.brushSize + 2) });
       } else if (ws === 'MODELING') {
@@ -329,8 +349,9 @@ export const WorkspaceLayout: React.FC = () => {
   const getCursor = () => {
     if (tool === 'PAN') return isPanningActive ? 'grabbing' : 'grab';
     if (workspace === 'PAINTING') {
-      if (['BRUSH', 'ERASER', 'SMUDGE', 'BLUR'].includes(tool)) return 'none';
-      if (tool === 'EYEDROPPER' || tool === 'SELECT_2D' || tool === 'MAGIC_WAND') return 'crosshair';
+      if (['BRUSH', 'ERASER'].includes(tool)) return 'none';
+      if (['EYEDROPPER', 'SHAPE_RECT', 'SHAPE_CIRCLE', 'SHAPE_LINE'].includes(tool)) return 'crosshair';
+      if (tool === 'MOVE_2D') return 'move';
       return 'crosshair';
     }
     return 'default';
@@ -365,7 +386,14 @@ export const WorkspaceLayout: React.FC = () => {
               type="file" 
               accept=".json" 
               ref={fileInputRef} 
-              onChange={handleImport}
+              onChange={handleImportProject}
+              className="hidden" 
+            />
+            <input 
+              type="file" 
+              accept="image/png, image/jpeg, image/jpg" 
+              ref={imageInputRef} 
+              onChange={handleImageImport}
               className="hidden" 
             />
             {fileMenuOpen && (
@@ -392,6 +420,15 @@ export const WorkspaceLayout: React.FC = () => {
                   }}
                 >
                   <Upload size={12} className="text-text-muted group-hover:text-text-secondary" /> Import Project
+                </button>
+                <button 
+                  className="w-full text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-text-secondary hover:text-text-primary hover:bg-bg-input transition flex items-center gap-2 group"
+                  onClick={() => {
+                    setFileMenuOpen(false);
+                    imageInputRef.current?.click();
+                  }}
+                >
+                  <ImageIcon size={12} className="text-text-muted group-hover:text-text-secondary" /> Import Image Layer
                 </button>
                 <button 
                   className="w-full text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-text-secondary hover:text-text-primary hover:bg-bg-input transition flex items-center gap-2 group"
@@ -469,15 +506,13 @@ export const WorkspaceLayout: React.FC = () => {
                 <ToolButton icon={<BoxSelect size={18} />} id="TRANSFORM_GIZMO" active={tool === 'TRANSFORM_GIZMO'} onClick={() => setTool('TRANSFORM_GIZMO')} tooltip="Universal Gizmo (Y)" />
                 
                 <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
-                <ToolButton icon={<Cuboid size={18} />} id="CREATE_PRIMITIVE" active={tool === 'CREATE_PRIMITIVE'} onClick={() => setTool('CREATE_PRIMITIVE')} tooltip="Add Primitive (Shift+A)" />
-
-                <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
                 <ToolButton icon={<Focus size={18} />} id="RESET_CAMERA" active={false} onClick={triggerCameraReset} tooltip="Reset Camera" />
               </>
             )}
 
             {workspace === 'PAINTING' && (
               <>
+                <ToolButton icon={<Move size={18} />} id="MOVE_2D" active={tool === 'MOVE_2D'} onClick={() => setTool('MOVE_2D')} tooltip="Move & Transform (V)" />
                 <ToolButton icon={<Pen size={18} />} id="BRUSH" active={tool === 'BRUSH'} onClick={() => setTool('BRUSH')} tooltip="Paint Brush (B)" />
                 <ToolButton icon={<Eraser size={18} />} id="ERASER" active={tool === 'ERASER'} onClick={() => setTool('ERASER')} tooltip="Eraser (E)" />
                 <ToolButton icon={<Pipette size={18} />} id="EYEDROPPER" active={tool === 'EYEDROPPER'} onClick={() => setTool('EYEDROPPER')} tooltip="Eyedropper (I)" />
@@ -485,14 +520,9 @@ export const WorkspaceLayout: React.FC = () => {
                 
                 <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
                 
-                <ToolButton icon={<Blend size={18} />} id="SMUDGE" active={tool === 'SMUDGE'} onClick={() => setTool('SMUDGE')} tooltip="Smudge Tool" />
-                <ToolButton icon={<Droplet size={18} />} id="BLUR" active={tool === 'BLUR'} onClick={() => setTool('BLUR')} tooltip="Blur Tool" />
-
-                <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
-                
                 <ToolButton icon={<Square size={18} />} id="SHAPE_RECT" active={tool === 'SHAPE_RECT'} onClick={() => setTool('SHAPE_RECT')} tooltip="Rectangle Shape (U)" />
-                <ToolButton icon={<Lasso size={18} />} id="SELECT_2D" active={tool === 'SELECT_2D'} onClick={() => setTool('SELECT_2D')} tooltip="Lasso Select (M)" />
-                <ToolButton icon={<Wand2 size={18} />} id="MAGIC_WAND" active={tool === 'MAGIC_WAND'} onClick={() => setTool('MAGIC_WAND')} tooltip="Magic Wand (W)" />
+                <ToolButton icon={<Circle size={18} />} id="SHAPE_CIRCLE" active={tool === 'SHAPE_CIRCLE'} onClick={() => setTool('SHAPE_CIRCLE')} tooltip="Circle Shape (C)" />
+                <ToolButton icon={<Minus size={18} />} id="SHAPE_LINE" active={tool === 'SHAPE_LINE'} onClick={() => setTool('SHAPE_LINE')} tooltip="Line Tool (L)" />
 
                 <div className="gsap-tool-btn w-8 h-px bg-neutral-800/50 my-2 shadow-[0_1px_0_rgba(255,255,255,0.02)]"></div>
                 
@@ -552,9 +582,32 @@ export const WorkspaceLayout: React.FC = () => {
               >
                 <ReferenceViewer />
                 <LayerSurface />
+                
+                {tool === 'MOVE_2D' && activeLayerBounds && (
+                  <div
+                    className="absolute border border-blue-500 z-30 pointer-events-none"
+                    style={{
+                      left: activeLayerBounds.x,
+                      top: activeLayerBounds.y,
+                      width: activeLayerBounds.w,
+                      height: activeLayerBounds.h,
+                    }}
+                  >
+                    <div className="absolute w-2.5 h-2.5 bg-bg-panel border border-blue-500 -left-[5px] -top-[5px]" />
+                    <div className="absolute w-2.5 h-2.5 bg-bg-panel border border-blue-500 -right-[5px] -top-[5px]" />
+                    <div className="absolute w-2.5 h-2.5 bg-bg-panel border border-blue-500 -left-[5px] -bottom-[5px]" />
+                    <div className="absolute w-2.5 h-2.5 bg-bg-panel border border-blue-500 -right-[5px] -bottom-[5px]" />
+                    
+                    <div className="absolute w-2.5 h-2.5 bg-bg-panel border border-blue-500 left-1/2 -top-[5px] -translate-x-1/2" />
+                    <div className="absolute w-2.5 h-2.5 bg-bg-panel border border-blue-500 left-1/2 -bottom-[5px] -translate-x-1/2" />
+                    <div className="absolute w-2.5 h-2.5 bg-bg-panel border border-blue-500 -left-[5px] top-1/2 -translate-y-1/2" />
+                    <div className="absolute w-2.5 h-2.5 bg-bg-panel border border-blue-500 -right-[5px] top-1/2 -translate-y-1/2" />
+                  </div>
+                )}
+
                 <div 
                   ref={interceptContainerRef}
-                  className="absolute inset-0 z-20 touch-none"
+                  className="absolute inset-0 z-40 touch-none"
                   style={{ 
                     pointerEvents: workspace === 'PAINTING' || tool === 'PAN' ? 'auto' : 'none',
                     cursor: getCursor()
@@ -573,7 +626,7 @@ export const WorkspaceLayout: React.FC = () => {
         </div>
 
         <div className={`
-          absolute lg:relative right-0 top-0 bottom-0 z-40 
+          absolute lg:relative right-0 top-0 bottom-0 z-50 
           transform transition-all duration-300 ease-in-out
           ${inspectorOpen ? 'translate-x-0 w-80 outline outline-1 outline-[#222228] lg:outline-none shadow-[-20px_0_40px_rgba(0,0,0,0.5)] lg:shadow-none' : 'translate-x-full lg:translate-x-0 lg:w-0 lg:min-w-0 overflow-hidden'}
           h-full bg-bg-panel
@@ -585,7 +638,7 @@ export const WorkspaceLayout: React.FC = () => {
         
         {inspectorOpen && (
           <div 
-            className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
             onClick={() => setInspectorOpen(false)}
           ></div>
         )}

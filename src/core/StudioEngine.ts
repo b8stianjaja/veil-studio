@@ -15,13 +15,21 @@ export class StudioEngine {
   private threeCamera: THREE.PerspectiveCamera | null = null;
   private threeScene: THREE.Scene | null = null;
   
-  // High-frequency state managed outside React
+  // FIX 2: Persistent Layer Cache to survive React unmounts during Workspace switches
+  private layerCache: Map<string, ImageData> = new Map();
+
   private isDrawing: boolean = false;
   private currentPath: { x: number, y: number }[] = [];
   private strokeSnapshot: ImageData | null = null;
   private rafId: number | null = null;
 
-  // Optimized History Stack using ImageData
+  private isMoving: boolean = false;
+  private moveStartX: number = 0;
+  private moveStartY: number = 0;
+  private moveSnapshotCanvas: HTMLCanvasElement | null = null;
+  private transformType: 'translate' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' = 'translate';
+  private startBounds: {x: number, y: number, w: number, h: number} | null = null;
+
   private history: HistoryState[] = [];
   private historyPointer: number = -1;
   private maxHistory: number = 20;
@@ -41,6 +49,15 @@ export class StudioEngine {
   private renderLoop() {
     this.rafId = requestAnimationFrame(this.renderLoop);
     this.flushPaints();
+  }
+
+  // Internal helper to keep the memory cache fresh
+  private updateLayerCache(layerId: string) {
+    const canvas = this.canvasLayers.get(layerId);
+    const ctx = this.ctxs.get(layerId);
+    if (canvas && ctx) {
+      this.layerCache.set(layerId, ctx.getImageData(0, 0, canvas.width, canvas.height));
+    }
   }
 
   private flushPaints() {
@@ -88,23 +105,9 @@ export class StudioEngine {
     ctx.strokeStyle = brushStr;
     ctx.globalCompositeOperation = state.tool === 'ERASER' ? 'destination-out' : 'source-over';
     
-    const animState = useAnimationStore.getState();
-    const isPainting = state.workspace === 'PAINTING';
-    const hasGrid = animState.columns > 1 || animState.rows > 1;
-    
     ctx.save();
-    if (isPainting && hasGrid && animState.activeFrame !== undefined) {
-      const dpr = window.devicePixelRatio || 1;
-      
-      const frameW = (canvas.width / dpr) / animState.columns;
-      const frameH = (canvas.height / dpr) / animState.rows;
-      const col = animState.activeFrame % animState.columns;
-      const row = Math.floor(animState.activeFrame / animState.columns);
-      
-      ctx.beginPath();
-      ctx.rect(col * frameW, row * frameH, frameW, frameH);
-      ctx.clip();
-    }
+    
+    // FIX 3: Removed Spritesheet clipping block so the user can draw anywhere freely
 
     const drawPath = (transform?: { scaleX: number, scaleY: number, transX: number, transY: number }) => {
       if (this.currentPath.length < 2) return;
@@ -117,19 +120,33 @@ export class StudioEngine {
       
       const p = this.currentPath.map(applyT);
       
-      ctx.moveTo(p[0].x, p[0].y);
-      
-      for (let i = 1; i < p.length - 2; i++) {
-        const xc = (p[i].x + p[i + 1].x) / 2;
-        const yc = (p[i].y + p[i + 1].y) / 2;
-        ctx.quadraticCurveTo(p[i].x, p[i].y, xc, yc);
-      }
-      
-      if (p.length > 2) {
-        const last = p.length - 1;
-        ctx.quadraticCurveTo(p[last - 1].x, p[last - 1].y, p[last].x, p[last].y);
+      if (state.tool === 'SHAPE_RECT') {
+        const start = p[0];
+        const end = p[p.length - 1];
+        ctx.rect(start.x, start.y, end.x - start.x, end.y - start.y);
+      } else if (state.tool === 'SHAPE_CIRCLE') {
+        const start = p[0];
+        const end = p[p.length - 1];
+        const radius = Math.hypot(end.x - start.x, end.y - start.y);
+        ctx.arc(start.x, start.y, radius, 0, Math.PI * 2);
+      } else if (state.tool === 'SHAPE_LINE') {
+        const start = p[0];
+        const end = p[p.length - 1];
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
       } else {
-        ctx.lineTo(p[1].x, p[1].y);
+        ctx.moveTo(p[0].x, p[0].y);
+        for (let i = 1; i < p.length - 2; i++) {
+          const xc = (p[i].x + p[i + 1].x) / 2;
+          const yc = (p[i].y + p[i + 1].y) / 2;
+          ctx.quadraticCurveTo(p[i].x, p[i].y, xc, yc);
+        }
+        if (p.length > 2) {
+          const last = p.length - 1;
+          ctx.quadraticCurveTo(p[last - 1].x, p[last - 1].y, p[last].x, p[last].y);
+        } else {
+          ctx.lineTo(p[1].x, p[1].y);
+        }
       }
       
       ctx.stroke();
@@ -172,6 +189,15 @@ export class StudioEngine {
     if (ctx) {
       ctx.scale(dpr, dpr);
       this.ctxs.set(id, ctx);
+
+      // FIX 2 Implementation: Instantly restore pixel data if React unmounted this canvas previously
+      const cached = this.layerCache.get(id);
+      if (cached) {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.putImageData(cached, 0, 0);
+        ctx.restore();
+      }
     }
     this.canvasLayers.set(id, canvas);
   }
@@ -184,13 +210,219 @@ export class StudioEngine {
     }
     this.canvasLayers.delete(id);
     this.ctxs.delete(id);
+    this.layerCache.delete(id);
   }
   
   public getProjectionMatrix() {
     if (!this.threeCamera) return new THREE.Matrix4();
     return this.threeCamera.projectionMatrix.clone();
   }
+
+  public updateActiveLayerBounds() {
+    const state = useCanvasStore.getState();
+    if (state.activeLayerId && state.workspace === 'PAINTING') {
+      const bounds = this.getLayerContentBounds(state.activeLayerId);
+      state.setActiveLayerBounds(bounds);
+    } else {
+      state.setActiveLayerBounds(null);
+    }
+  }
+
+  // --- FIX 1: Overhauled Transform Tool Engine ---
+  public startMove(x: number, y: number) {
+    const state = useCanvasStore.getState();
+    if (!state.activeLayerId) return;
+    
+    const layer = state.layers.find(l => l.id === state.activeLayerId);
+    if (layer?.locked) return;
+
+    const canvas = this.canvasLayers.get(state.activeLayerId);
+    const ctx = this.ctxs.get(state.activeLayerId);
+    if (!canvas || !ctx) return;
+
+    this.startBounds = this.getLayerContentBounds(state.activeLayerId);
+    if (!this.startBounds) return; 
+
+    this.isMoving = true;
+    this.moveStartX = x;
+    this.moveStartY = y;
+
+    const sb = this.startBounds;
+    const THRESHOLD = 20; 
+    
+    const midX = sb.x + sb.w / 2;
+    const midY = sb.y + sb.h / 2;
+
+    const dNW = Math.hypot(x - sb.x, y - sb.y);
+    const dNE = Math.hypot(x - (sb.x + sb.w), y - sb.y);
+    const dSW = Math.hypot(x - sb.x, y - (sb.y + sb.h));
+    const dSE = Math.hypot(x - (sb.x + sb.w), y - (sb.y + sb.h));
+    const dN  = Math.hypot(x - midX, y - sb.y);
+    const dS  = Math.hypot(x - midX, y - (sb.y + sb.h));
+    const dE  = Math.hypot(x - (sb.x + sb.w), y - midY);
+    const dW  = Math.hypot(x - sb.x, y - midY);
+
+    const minD = Math.min(dNW, dNE, dSW, dSE, dN, dS, dE, dW);
+    
+    if (minD < THRESHOLD) {
+      if (minD === dNW) this.transformType = 'nw';
+      else if (minD === dNE) this.transformType = 'ne';
+      else if (minD === dSW) this.transformType = 'sw';
+      else if (minD === dSE) this.transformType = 'se';
+      else if (minD === dN) this.transformType = 'n';
+      else if (minD === dS) this.transformType = 's';
+      else if (minD === dE) this.transformType = 'e';
+      else if (minD === dW) this.transformType = 'w';
+    } else {
+      this.transformType = 'translate';
+    }
+
+    if (!this.moveSnapshotCanvas) {
+      this.moveSnapshotCanvas = document.createElement('canvas');
+    }
+    
+    const dpr = window.devicePixelRatio || 1;
+    this.moveSnapshotCanvas.width = sb.w * dpr;
+    this.moveSnapshotCanvas.height = sb.h * dpr;
+    
+    const snapCtx = this.moveSnapshotCanvas.getContext('2d');
+    if (snapCtx) {
+      snapCtx.clearRect(0, 0, sb.w * dpr, sb.h * dpr);
+      snapCtx.drawImage(
+        canvas, 
+        sb.x * dpr, sb.y * dpr, sb.w * dpr, sb.h * dpr,
+        0, 0, sb.w * dpr, sb.h * dpr
+      );
+    }
+
+    this.saveHistoryState(state.activeLayerId, ctx.getImageData(0, 0, canvas.width, canvas.height));
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  public continueMove(x: number, y: number, shiftKey: boolean = false) {
+    if (!this.isMoving || !this.moveSnapshotCanvas || !this.startBounds) return;
+
+    const state = useCanvasStore.getState();
+    const canvas = this.canvasLayers.get(state.activeLayerId!);
+    const ctx = this.ctxs.get(state.activeLayerId!);
+    if (!canvas || !ctx) return;
+
+    const dx = x - this.moveStartX;
+    const dy = y - this.moveStartY;
+    
+    let newBox = { ...this.startBounds };
+    const ratio = this.startBounds.w / this.startBounds.h;
+
+    switch (this.transformType) {
+      case 'translate':
+        newBox.x += dx;
+        newBox.y += dy;
+        break;
+      case 'se':
+        newBox.w += dx;
+        if (shiftKey) newBox.h = newBox.w / ratio;
+        else newBox.h += dy;
+        break;
+      case 'nw':
+        newBox.x += dx;
+        newBox.w -= dx;
+        if (shiftKey) {
+          const dh = (newBox.w / ratio) - this.startBounds.h;
+          newBox.h += dh;
+          newBox.y -= dh;
+        } else {
+          newBox.y += dy;
+          newBox.h -= dy;
+        }
+        break;
+      case 'ne':
+        newBox.w += dx;
+        if (shiftKey) {
+          const dh = (newBox.w / ratio) - this.startBounds.h;
+          newBox.h += dh;
+          newBox.y -= dh;
+        } else {
+          newBox.y += dy;
+          newBox.h -= dy;
+        }
+        break;
+      case 'sw':
+        newBox.x += dx;
+        newBox.w -= dx;
+        if (shiftKey) newBox.h = newBox.w / ratio;
+        else newBox.h += dy;
+        break;
+      case 'e':
+        newBox.w += dx;
+        if (shiftKey) {
+          const dh = (newBox.w / ratio) - this.startBounds.h;
+          newBox.h += dh;
+          newBox.y -= dh / 2; 
+        }
+        break;
+      case 'w':
+        newBox.x += dx;
+        newBox.w -= dx;
+        if (shiftKey) {
+          const dh = (newBox.w / ratio) - this.startBounds.h;
+          newBox.h += dh;
+          newBox.y -= dh / 2;
+        }
+        break;
+      case 's':
+        newBox.h += dy;
+        if (shiftKey) {
+          const dw = (newBox.h * ratio) - this.startBounds.w;
+          newBox.w += dw;
+          newBox.x -= dw / 2;
+        }
+        break;
+      case 'n':
+        newBox.y += dy;
+        newBox.h -= dy;
+        if (shiftKey) {
+          const dw = (newBox.h * ratio) - this.startBounds.w;
+          newBox.w += dw;
+          newBox.x -= dw / 2;
+        }
+        break;
+    }
+
+    // Absolute rendering logic fixes geometric distortion completely
+    const dpr = window.devicePixelRatio || 1;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform matrix
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw directly from source to destination to prevent compound scaling errors
+    ctx.drawImage(
+      this.moveSnapshotCanvas, 
+      0, 0, this.moveSnapshotCanvas.width, this.moveSnapshotCanvas.height,
+      newBox.x * dpr, newBox.y * dpr, newBox.w * dpr, newBox.h * dpr
+    );
+    ctx.restore();
+
+    state.setActiveLayerBounds(newBox);
+  }
+
+  public endMove() {
+    if (!this.isMoving) return;
+    this.isMoving = false;
+
+    const state = useCanvasStore.getState();
+    if (state.activeLayerId) {
+      const canvas = this.canvasLayers.get(state.activeLayerId);
+      const ctx = this.ctxs.get(state.activeLayerId);
+      if (canvas && ctx) {
+        this.saveHistoryState(state.activeLayerId, ctx.getImageData(0, 0, canvas.width, canvas.height));
+        this.updateLayerCache(state.activeLayerId);
+        state.markLayerUpdated(state.activeLayerId);
+      }
+    }
+    this.updateActiveLayerBounds();
+  }
   
+  // --- DRAWING TOOL LOGIC ---
   public startStroke(x: number, y: number) {
     const state = useCanvasStore.getState();
     const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
@@ -235,7 +467,6 @@ export class StudioEngine {
       this.history.splice(this.historyPointer + 1);
     }
     
-    // Deep copy the ImageData to prevent mutations
     const dataCopy = new ImageData(
       new Uint8ClampedArray(imageData.data),
       imageData.width,
@@ -265,8 +496,101 @@ export class StudioEngine {
       if (canvas && ctx) {
         const finalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         this.saveHistoryState(state.activeLayerId, finalImageData);
+        this.updateLayerCache(state.activeLayerId);
       }
     }
+    this.updateActiveLayerBounds();
+  }
+
+  public floodFill(x: number, y: number) {
+    const state = useCanvasStore.getState();
+    const activeLayerId = state.activeLayerId;
+    if (!activeLayerId) return;
+
+    const layer = state.layers.find(l => l.id === activeLayerId);
+    if (layer?.locked) return;
+
+    const canvas = this.canvasLayers.get(activeLayerId);
+    const ctx = this.ctxs.get(activeLayerId);
+    if (!canvas || !ctx) return;
+
+    const beforeImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    this.saveHistoryState(activeLayerId, beforeImageData);
+
+    const dpr = window.devicePixelRatio || 1;
+    const sx = Math.floor(x * dpr);
+    const sy = Math.floor(y * dpr);
+
+    if (sx < 0 || sx >= canvas.width || sy < 0 || sy >= canvas.height) return;
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    const width = canvas.width;
+    const height = canvas.height;
+
+    const targetPos = (sy * width + sx) * 4;
+    const tr = data[targetPos], tg = data[targetPos+1], tb = data[targetPos+2], ta = data[targetPos+3];
+
+    const hex = state.brushColor.replace('#', '');
+    const fr = parseInt(hex.substring(0, 2), 16) || 0;
+    const fg = parseInt(hex.substring(2, 4), 16) || 0;
+    const fb = parseInt(hex.substring(4, 6), 16) || 0;
+    const fa = Math.round(state.brushOpacity * 255);
+
+    if (tr === fr && tg === fg && tb === fb && Math.abs(ta - fa) < 5) return;
+
+    const colorMatch = (pos: number) => {
+      return Math.abs(data[pos] - tr) <= 5 && 
+             Math.abs(data[pos+1] - tg) <= 5 && 
+             Math.abs(data[pos+2] - tb) <= 5 && 
+             Math.abs(data[pos+3] - ta) <= 5;
+    };
+    
+    const setColor = (pos: number) => { data[pos] = fr; data[pos+1] = fg; data[pos+2] = fb; data[pos+3] = fa; };
+
+    const stack = [[sx, sy]];
+    while (stack.length > 0) {
+      const [cx, cy] = stack.pop()!;
+      let currX = cx;
+      let currY = cy;
+      let pos = (currY * width + currX) * 4;
+
+      while (currY >= 0 && colorMatch(pos)) {
+        currY--;
+        pos -= width * 4;
+      }
+      pos += width * 4;
+      currY++;
+
+      let reachLeft = false;
+      let reachRight = false;
+
+      while (currY < height && colorMatch(pos)) {
+        setColor(pos);
+
+        if (currX > 0) {
+          if (colorMatch(pos - 4)) {
+            if (!reachLeft) { stack.push([currX - 1, currY]); reachLeft = true; }
+          } else if (reachLeft) { reachLeft = false; }
+        }
+
+        if (currX < width - 1) {
+          if (colorMatch(pos + 4)) {
+            if (!reachRight) { stack.push([currX + 1, currY]); reachRight = true; }
+          } else if (reachRight) { reachRight = false; }
+        }
+
+        currY++;
+        pos += width * 4;
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    const afterImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    this.saveHistoryState(activeLayerId, afterImageData);
+    this.updateLayerCache(activeLayerId);
+    state.markLayerUpdated(activeLayerId);
+    this.updateActiveLayerBounds();
   }
 
   public undo() {
@@ -278,7 +602,9 @@ export class StudioEngine {
     const ctx = this.ctxs.get(previousState.layerId);
     if (ctx && previousState.imageData) {
       ctx.putImageData(previousState.imageData, 0, 0);
+      this.updateLayerCache(previousState.layerId);
       useCanvasStore.getState().markLayerUpdated(previousState.layerId);
+      this.updateActiveLayerBounds();
     }
   }
 
@@ -291,7 +617,9 @@ export class StudioEngine {
     const ctx = this.ctxs.get(nextState.layerId);
     if (ctx && nextState.imageData) {
       ctx.putImageData(nextState.imageData, 0, 0);
+      this.updateLayerCache(nextState.layerId);
       useCanvasStore.getState().markLayerUpdated(nextState.layerId);
+      this.updateActiveLayerBounds();
     }
   }
 
@@ -318,8 +646,11 @@ export class StudioEngine {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0);
         ctx.restore();
+        
+        this.updateLayerCache(layerId);
         const state = useCanvasStore.getState();
         state.markLayerUpdated(layerId);
+        this.updateActiveLayerBounds();
         resolve();
       };
       img.src = base64Buffer;
@@ -346,6 +677,7 @@ export class StudioEngine {
         ctx.scale(dpr, dpr);
         ctx.drawImage(tempCanvas, 0, 0);
         ctx.restore();
+        this.updateLayerCache(id);
       }
     });
     
@@ -365,7 +697,9 @@ export class StudioEngine {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.restore();
+      this.updateLayerCache(layerId);
       state.markLayerUpdated(layerId);
+      this.updateActiveLayerBounds();
     }
   }
 
@@ -389,6 +723,7 @@ export class StudioEngine {
       ctx.clearRect(col * physicalW, row * physicalH, physicalW, physicalH);
       ctx.restore();
       
+      this.updateLayerCache(layerId);
       state.markLayerUpdated(layerId);
     }
   }
@@ -434,6 +769,7 @@ export class StudioEngine {
     );
     ctx.restore();
 
+    this.updateLayerCache(layerId);
     state.markLayerUpdated(layerId);
   }
 
@@ -479,19 +815,18 @@ export class StudioEngine {
     if (maxX < minX || maxY < minY) return null;
 
     const dpr = window.devicePixelRatio || 1;
-    const padding = 20;
 
     return {
-      x: Math.max(0, (minX / scale) / dpr - padding),
-      y: Math.max(0, (minY / scale) / dpr - padding),
-      w: ((maxX - minX + 1) / scale) / dpr + (padding * 2),
-      h: ((maxY - minY + 1) / scale) / dpr + (padding * 2)
+      x: Math.max(0, (minX / scale) / dpr),
+      y: Math.max(0, (minY / scale) / dpr),
+      w: ((maxX - minX + 1) / scale) / dpr,
+      h: ((maxY - minY + 1) / scale) / dpr
     };
   }
 
   private compositeCanvas: HTMLCanvasElement | null = null;
   
-  public getCompositeCanvas(): HTMLCanvasElement | null {
+  public getCompositeCanvas(includeBackground: boolean = true): HTMLCanvasElement | null {
     const firstCanvas = Array.from(this.canvasLayers.values())[0];
     const width = firstCanvas?.width || 800;
     const height = firstCanvas?.height || 600;
@@ -509,7 +844,7 @@ export class StudioEngine {
     
     ctx.clearRect(0, 0, width, height);
     
-    if (state.backgroundColor && state.backgroundColor !== 'transparent') {
+    if (includeBackground && state.backgroundColor && state.backgroundColor !== 'transparent') {
       ctx.fillStyle = state.backgroundColor;
       ctx.fillRect(0, 0, width, height);
     }
@@ -548,9 +883,9 @@ export class StudioEngine {
     return this.compositeCanvas;
   }
 
-  public getCompositeBlob(): Promise<Blob | null> {
+  public getCompositeBlob(includeBackground: boolean = true): Promise<Blob | null> {
     return new Promise((resolve) => {
-      const canvas = this.getCompositeCanvas();
+      const canvas = this.getCompositeCanvas(includeBackground);
       if (!canvas) resolve(null);
       else canvas.toBlob((blob) => resolve(blob), 'image/png');
     });

@@ -3,7 +3,7 @@ export type WorkspaceMode = 'MODELING' | 'PAINTING';
 export type ToolType = 
   // Painting Suite
   | 'BRUSH' | 'ERASER' | 'PAN' | 'EYEDROPPER' | 'BUCKET' | 'SHAPE_LINE' | 'SHAPE_RECT' | 'SHAPE_CIRCLE' | 'SELECT_2D'
-  | 'MAGIC_WAND' | 'SMUDGE' | 'BLUR'
+  | 'MAGIC_WAND' | 'SMUDGE' | 'BLUR' | 'MOVE_2D' // Added MOVE_2D
   // Modeling Suite
   | 'ORBIT' | 'SELECT' | 'ROTATE' | 'SCALE' | 'TRANSFORM_GIZMO' | 'CREATE_PRIMITIVE';
 

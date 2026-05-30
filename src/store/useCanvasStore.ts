@@ -38,6 +38,9 @@ interface CanvasState {
   zoom: number;
   pan: { x: number, y: number };
   
+  activeLayerBounds: { x: number, y: number, w: number, h: number } | null;
+  setActiveLayerBounds: (bounds: { x: number, y: number, w: number, h: number } | null) => void;
+
   toggleTheme: () => void;
   setProjectConfigured: (configured: boolean) => void;
   setProjectConfig: (config: { width: number, height: number }) => void;
@@ -78,7 +81,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   brushHardness: 100,
   brushFlow: 100,
   globalOpacity: 1,
-  backgroundColor: '#0a0a0a',
+  backgroundColor: 'transparent',
   layerUpdateTick: { [initialLayerId]: Date.now() },
   globalUpdateTick: 0,
   symmetryX: false,
@@ -97,8 +100,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   isSpritesheetMode: false,
   zoom: 1,
   pan: { x: 0, y: 0 },
+  activeLayerBounds: null,
 
   setAutoSaveStatus: (status) => set({ autoSaveStatus: status }),
+  setActiveLayerBounds: (bounds) => set({ activeLayerBounds: bounds }),
   
   toggleTheme: () => set(state => {
     const newTheme = state.theme === 'dark' ? 'light' : 'dark';
@@ -251,7 +256,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     activeLayerId: layers.length > 0 ? [...layers].sort((a,b) => b.order - a.order)[0].id : null,
     workspace: 'PAINTING',
     tool: 'BRUSH',
-    backgroundColor: backgroundColor || '#0a0a0a',
+    backgroundColor: backgroundColor || 'transparent',
     isSpritesheetMode: isSpritesheet ?? false,
     globalUpdateTick: state.globalUpdateTick + 1
   })),

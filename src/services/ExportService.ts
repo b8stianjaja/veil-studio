@@ -14,8 +14,6 @@ export class ExportService {
         throw new Error("Invalid project file");
       }
       
-      // Updated to restore the camera configuration alongside nodes and lights
-      // Passing undefined for environment to keep the user's current environment settings
       useSceneStore.getState().restoreState(
         project.scene.nodes, 
         project.scene.lights,
@@ -35,7 +33,11 @@ export class ExportService {
         useCanvasStore.getState().setProjectConfig({ width: project.canvas.width, height: project.canvas.height });
         StudioEngine.getInstance().resizeAllLayers(project.canvas.width, project.canvas.height);
       }
-      useCanvasStore.getState().restoreState(project.layers, project.canvas?.backgroundColor);
+      
+      // Delaying the restore slightly ensures the DOM has resized if the canvas config changed above
+      setTimeout(() => {
+        useCanvasStore.getState().restoreState(project.layers, project.canvas?.backgroundColor);
+      }, 50);
       
     } catch (e) {
       console.error("Failed to import project:", e);
@@ -43,8 +45,32 @@ export class ExportService {
     }
   }
 
+  // ADDED: Handles importing images (PNG, JPG) as new manipulable layers
+  static importImage(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      if (!dataUrl) return;
+
+      const state = useCanvasStore.getState();
+      state.addLayer();
+      
+      // A slight delay is needed to allow React to mount the new LayerCanvas component
+      setTimeout(() => {
+        const activeId = useCanvasStore.getState().activeLayerId;
+        if (activeId) {
+          useCanvasStore.getState().updateLayer(activeId, { 
+            name: file.name.replace(/\.[^/.]+$/, ""), 
+            buffer: dataUrl 
+          });
+          StudioEngine.getInstance().restoreLayerBuffer(activeId, dataUrl);
+        }
+      }, 100);
+    };
+    reader.readAsDataURL(file);
+  }
+
   static async exportProjectJSON() {
-    
     const sceneState = useSceneStore.getState();
     const canvasState = useCanvasStore.getState();
     const animationState = useAnimationStore.getState();
@@ -75,7 +101,6 @@ export class ExportService {
       scene: {
         nodes: sceneState.nodes,
         lights: sceneState.lights,
-        // Added camera state serialization
         camera: sceneState.camera
       },
       animation: {
@@ -92,7 +117,7 @@ export class ExportService {
 
   static async exportCompositePNG() {
     const engine = StudioEngine.getInstance();
-    const blob = await engine.getCompositeBlob();
+    const blob = await engine.getCompositeBlob(false);
     if (blob) {
       this.download(blob, `veil-spritesheet-${Date.now()}.png`);
     }
@@ -113,7 +138,6 @@ export class ExportService {
     const ctx = exportCanvas.getContext('2d');
     if (!ctx) return;
 
-    // Use 0 as captureStream parameter to allow explicit frame triggering
     const stream = exportCanvas.captureStream(0);
     const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
     
@@ -144,8 +168,13 @@ export class ExportService {
       const row = Math.floor(currentFrame / columns);
       
       const state = useCanvasStore.getState();
-      ctx.fillStyle = state.backgroundColor || '#0a0a0a';
-      ctx.fillRect(0, 0, frameW, frameH);
+      
+      if (!state.backgroundColor || state.backgroundColor === 'transparent') {
+        ctx.clearRect(0, 0, frameW, frameH);
+      } else {
+        ctx.fillStyle = state.backgroundColor;
+        ctx.fillRect(0, 0, frameW, frameH);
+      }
 
       ctx.drawImage(
         compCanvas, 
@@ -153,11 +182,9 @@ export class ExportService {
         0, 0, frameW, frameH
       );
       
-      // Force MediaRecorder to capture this exact rendered state
       track.requestFrame();
       currentFrame++;
       
-      // Use promises to keep the UI thread clear
       await new Promise(resolve => setTimeout(resolve, 1000 / fps));
       renderNextFrame();
     };

@@ -4,12 +4,12 @@ import { WorkspaceMode, ToolType } from '../types';
 const INTERACTIVE_TOOLS: ToolType[] = [
   'BRUSH', 'ERASER', 'SMUDGE', 'BLUR', 
   'BUCKET', 'MAGIC_WAND', 
-  'SHAPE_RECT', 'SHAPE_LINE', 'SHAPE_CIRCLE'
+  'SHAPE_RECT', 'SHAPE_LINE', 'SHAPE_CIRCLE', 'MOVE_2D'
 ];
 
 const DRAG_TOOLS: ToolType[] = [
   'BRUSH', 'ERASER', 'SMUDGE', 'BLUR',
-  'SHAPE_RECT', 'SHAPE_LINE', 'SHAPE_CIRCLE'
+  'SHAPE_RECT', 'SHAPE_LINE', 'SHAPE_CIRCLE', 'MOVE_2D'
 ];
 
 export class InputInterceptor {
@@ -22,7 +22,7 @@ export class InputInterceptor {
     configHeight: number
   ) {
     if (workspace === 'PAINTING' && INTERACTIVE_TOOLS.includes(tool)) {
-      if (e.button !== 0) return; // Only interact on primary click
+      if (e.button !== 0) return; 
       e.stopPropagation();
       
       const engine = StudioEngine.getInstance();
@@ -33,7 +33,10 @@ export class InputInterceptor {
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       
-      if (tool === 'BUCKET' || tool === 'MAGIC_WAND') {
+      if (tool === 'MOVE_2D') {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        engine.startMove(x, y);
+      } else if (tool === 'BUCKET' || tool === 'MAGIC_WAND') {
         engine.floodFill(x, y);
       } else {
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -60,7 +63,13 @@ export class InputInterceptor {
       
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
-      engine.continueStroke(x, y);
+      
+      if (tool === 'MOVE_2D') {
+        // FIXED: Passing shiftKey for proportional scaling
+        engine.continueMove(x, y, e.shiftKey);
+      } else {
+        engine.continueStroke(x, y);
+      }
     }
   }
 
@@ -75,7 +84,12 @@ export class InputInterceptor {
       }
       e.stopPropagation();
       const engine = StudioEngine.getInstance();
-      engine.endStroke();
+      
+      if (tool === 'MOVE_2D') {
+        engine.endMove();
+      } else {
+        engine.endStroke();
+      }
     }
   }
 }
