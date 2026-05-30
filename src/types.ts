@@ -65,8 +65,7 @@ export interface LayerConfig {
   order: number;
   visible: boolean;
   opacity: number;
-  buffer?: string;
-  name: string;
+  buffer?: string | Blob | null;  name: string;
   locked?: boolean;
   blendMode?: BlendMode;
   type?: 'LAYER' | 'FOLDER';

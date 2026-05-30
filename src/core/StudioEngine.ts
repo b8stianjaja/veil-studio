@@ -8,7 +8,7 @@ import { getFlattenedRenderLayers } from '../utils/layerUtils';
 
 interface HistoryState {
   layerId: string;
-  imageData: ImageData | null;
+  blob: Blob | null; // MEMORY FIX: Replaced raw ImageData with compressed binary Blob
 }
 
 export class StudioEngine {
@@ -127,7 +127,7 @@ export class StudioEngine {
           thinning: 0.6,
           smoothing: 0.5,
           streamline: 0.5,
-          simulatePressure: p.every(pt => pt.pressure === 0.5) // Auto-simulate if mouse is used
+          simulatePressure: p.every(pt => pt.pressure === 0.5) 
         });
 
         if (strokePoints.length === 0) return;
@@ -139,9 +139,9 @@ export class StudioEngine {
         }
         ctx.closePath();
         
-        ctx.fillStyle = brushStr; // Fill polygon instead of stroke
+        ctx.fillStyle = brushStr; 
         ctx.fill();
-        return; // Exit early for perfect-freehand
+        return; 
       }
       
       // FALLBACK FOR GEOMETRIC SHAPES
@@ -217,7 +217,6 @@ export class StudioEngine {
       ctx.scale(dpr, dpr);
       this.ctxs.set(id, ctx);
 
-      // Instantly restore pixel data if React unmounted this canvas previously
       const cached = this.layerCache.get(id);
       if (cached) {
         ctx.save();
@@ -269,6 +268,11 @@ export class StudioEngine {
 
     this.startBounds = this.getLayerContentBounds(state.activeLayerId);
     if (!this.startBounds) return; 
+
+    // MEMORY FIX: Only save initial state if history is empty
+    if (this.history.length === 0) {
+      this.pushToHistory(state.activeLayerId, canvas);
+    }
 
     this.isMoving = true;
     this.moveStartX = x;
@@ -322,11 +326,10 @@ export class StudioEngine {
       );
     }
 
-    this.saveHistoryState(state.activeLayerId, ctx.getImageData(0, 0, canvas.width, canvas.height));
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // Enforce physical pixel rendering
+    ctx.setTransform(1, 0, 0, 1, 0, 0); 
     ctx.drawImage(
       this.moveSnapshotCanvas, 
       0, 0, this.moveSnapshotCanvas.width, this.moveSnapshotCanvas.height,
@@ -446,9 +449,8 @@ export class StudioEngine {
     const state = useCanvasStore.getState();
     if (state.activeLayerId) {
       const canvas = this.canvasLayers.get(state.activeLayerId);
-      const ctx = this.ctxs.get(state.activeLayerId);
-      if (canvas && ctx) {
-        this.saveHistoryState(state.activeLayerId, ctx.getImageData(0, 0, canvas.width, canvas.height));
+      if (canvas) {
+        this.pushToHistory(state.activeLayerId, canvas); // MEMORY FIX: Push final state
         this.updateLayerCache(state.activeLayerId);
         state.markLayerUpdated(state.activeLayerId);
       }
@@ -466,8 +468,11 @@ export class StudioEngine {
     const ctx = this.ctxs.get(state.activeLayerId!);
     
     if (canvas && ctx) {
+      // MEMORY FIX: Save initial baseline state only if history is empty
+      if (this.history.length === 0) {
+        this.pushToHistory(state.activeLayerId!, canvas);
+      }
       this.strokeSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      this.saveHistoryState(state.activeLayerId!, this.strokeSnapshot);
     }
 
     let nx = x;
@@ -496,25 +501,6 @@ export class StudioEngine {
     this.currentPath.push({ x: nx, y: ny, pressure });
   }
 
-  private saveHistoryState(layerId: string, imageData: ImageData) {
-    if (this.historyPointer < this.history.length - 1) {
-      this.history.splice(this.historyPointer + 1);
-    }
-    
-    const dataCopy = new ImageData(
-      new Uint8ClampedArray(imageData.data),
-      imageData.width,
-      imageData.height
-    );
-    
-    this.history.push({ layerId, imageData: dataCopy });
-    if (this.history.length > this.maxHistory) {
-      this.history.shift();
-    } else {
-      this.historyPointer++;
-    }
-  }
-
   public endStroke() {
     this.isDrawing = false;
     this.flushPaints();
@@ -526,10 +512,8 @@ export class StudioEngine {
       state.markLayerUpdated(state.activeLayerId);
       
       const canvas = this.canvasLayers.get(state.activeLayerId);
-      const ctx = this.ctxs.get(state.activeLayerId);
-      if (canvas && ctx) {
-        const finalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        this.saveHistoryState(state.activeLayerId, finalImageData);
+      if (canvas) {
+        this.pushToHistory(state.activeLayerId, canvas); // MEMORY FIX: Push final state
         this.updateLayerCache(state.activeLayerId);
       }
     }
@@ -548,8 +532,10 @@ export class StudioEngine {
     const ctx = this.ctxs.get(activeLayerId);
     if (!canvas || !ctx) return;
 
-    const beforeImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    this.saveHistoryState(activeLayerId, beforeImageData);
+    // MEMORY FIX: Save initial state if empty
+    if (this.history.length === 0) {
+      this.pushToHistory(activeLayerId, canvas);
+    }
 
     const dpr = window.devicePixelRatio || 1;
     const sx = Math.floor(x * dpr);
@@ -620,50 +606,97 @@ export class StudioEngine {
     }
 
     ctx.putImageData(imageData, 0, 0);
-    const afterImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    this.saveHistoryState(activeLayerId, afterImageData);
+    
+    // MEMORY FIX: Push final state
+    this.pushToHistory(activeLayerId, canvas);
     this.updateLayerCache(activeLayerId);
     state.markLayerUpdated(activeLayerId);
     this.updateActiveLayerBounds();
   }
 
+  // --- MEMORY-SAFE HISTORY SYSTEM ---
+
+  private pushToHistory(layerId: string, canvas: HTMLCanvasElement) {
+    if (this.historyPointer < this.history.length - 1) {
+      this.history.splice(this.historyPointer + 1);
+    }
+
+    // Push the state placeholder immediately to maintain strict ordering
+    const state: HistoryState = { layerId, blob: null };
+    this.history.push(state);
+
+    if (this.history.length > this.maxHistory) {
+      this.history.shift();
+    } else {
+      this.historyPointer++;
+    }
+
+    // Fast synchronous copy to prevent user drawing over the blob processing
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tCtx = tempCanvas.getContext('2d');
+    if (tCtx) tCtx.drawImage(canvas, 0, 0);
+
+    // Async compression to prevent main thread blocking
+    tempCanvas.toBlob((blob) => {
+      state.blob = blob;
+      tempCanvas.width = 0; // Release memory
+      tempCanvas.height = 0;
+    }, 'image/png');
+  }
+
+  private applyHistoryState(state: HistoryState) {
+    if (!state.blob) {
+      // If the user hit undo faster than the compression finished, wait a frame
+      requestAnimationFrame(() => this.applyHistoryState(state));
+      return;
+    }
+
+    const ctx = this.ctxs.get(state.layerId);
+    const canvas = this.canvasLayers.get(state.layerId);
+    if (ctx && canvas) {
+      const img = new Image();
+      const url = URL.createObjectURL(state.blob);
+      
+      img.onload = () => {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        ctx.restore();
+        
+        URL.revokeObjectURL(url); // Prevent URL memory leaks
+        
+        this.updateLayerCache(state.layerId);
+        useCanvasStore.getState().markLayerUpdated(state.layerId);
+        this.updateActiveLayerBounds();
+      };
+      img.src = url;
+    }
+  }
+
   public undo() {
     if (this.historyPointer <= 0) return;
-    
     this.historyPointer--;
-    const previousState = this.history[this.historyPointer];
-    
-    const ctx = this.ctxs.get(previousState.layerId);
-    if (ctx && previousState.imageData) {
-      ctx.putImageData(previousState.imageData, 0, 0);
-      this.updateLayerCache(previousState.layerId);
-      useCanvasStore.getState().markLayerUpdated(previousState.layerId);
-      this.updateActiveLayerBounds();
-    }
+    this.applyHistoryState(this.history[this.historyPointer]);
   }
 
   public redo() {
     if (this.historyPointer >= this.history.length - 1) return;
-    
     this.historyPointer++;
-    const nextState = this.history[this.historyPointer];
-    
-    const ctx = this.ctxs.get(nextState.layerId);
-    if (ctx && nextState.imageData) {
-      ctx.putImageData(nextState.imageData, 0, 0);
-      this.updateLayerCache(nextState.layerId);
-      useCanvasStore.getState().markLayerUpdated(nextState.layerId);
-      this.updateActiveLayerBounds();
-    }
+    this.applyHistoryState(this.history[this.historyPointer]);
   }
 
   public getFrameBuffer(layerId: string) {
     return this.canvasLayers.get(layerId);
   }
 
-  public restoreLayerBuffer(layerId: string, base64Buffer: string): Promise<void> {
+  // OBJECTIVE 1 FIX INCLUDED: Supports both Legacy Base64 and New Blob architecture
+  public restoreLayerBuffer(layerId: string, bufferData: string | Blob): Promise<void> {
     return new Promise((resolve) => {
-      if (!base64Buffer) {
+      if (!bufferData) {
         this.clearLayer(layerId);
         return resolve();
       }
@@ -677,7 +710,10 @@ export class StudioEngine {
         const currentCanvas = this.canvasLayers.get(layerId);
         const currentCtx = this.ctxs.get(layerId);
         
-        if (!currentCanvas || !currentCtx || currentCanvas.width === 0 || currentCanvas.height === 0) return resolve();
+        if (!currentCanvas || !currentCtx || currentCanvas.width === 0 || currentCanvas.height === 0) {
+          if (bufferData instanceof Blob) URL.revokeObjectURL(img.src);
+          return resolve();
+        }
 
         currentCtx.save();
         currentCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -690,9 +726,19 @@ export class StudioEngine {
         const state = useCanvasStore.getState();
         state.markLayerUpdated(layerId);
         this.updateActiveLayerBounds();
+        
+        if (bufferData instanceof Blob) {
+          URL.revokeObjectURL(img.src);
+        }
+        
         resolve();
       };
-      img.src = base64Buffer;
+      
+      if (bufferData instanceof Blob) {
+        img.src = URL.createObjectURL(bufferData);
+      } else {
+        img.src = bufferData;
+      }
     });
   }
 
@@ -732,10 +778,15 @@ export class StudioEngine {
     const canvas = this.canvasLayers.get(layerId);
     const ctx = this.ctxs.get(layerId);
     if (canvas && ctx) {
+      // MEMORY FIX: Record state before clearing
+      if (this.history.length === 0) this.pushToHistory(layerId, canvas);
+
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.restore();
+      
+      this.pushToHistory(layerId, canvas);
       this.updateLayerCache(layerId);
       state.markLayerUpdated(layerId);
       this.updateActiveLayerBounds();
@@ -750,6 +801,8 @@ export class StudioEngine {
     const canvas = this.canvasLayers.get(layerId);
     const ctx = this.ctxs.get(layerId);
     if (canvas && ctx) {
+      if (this.history.length === 0) this.pushToHistory(layerId, canvas);
+
       const physicalW = canvas.width / columns; 
       const physicalH = canvas.height / rows;
       
@@ -762,6 +815,7 @@ export class StudioEngine {
       ctx.clearRect(col * physicalW, row * physicalH, physicalW, physicalH);
       ctx.restore();
       
+      this.pushToHistory(layerId, canvas);
       this.updateLayerCache(layerId);
       state.markLayerUpdated(layerId);
     }
@@ -775,6 +829,8 @@ export class StudioEngine {
     const canvas = this.canvasLayers.get(layerId);
     const ctx = this.ctxs.get(layerId);
     if (!canvas || !ctx) return;
+
+    if (this.history.length === 0) this.pushToHistory(layerId, canvas);
 
     const physicalW = canvas.width / columns;
     const physicalH = canvas.height / rows;
@@ -808,6 +864,7 @@ export class StudioEngine {
     );
     ctx.restore();
 
+    this.pushToHistory(layerId, canvas);
     this.updateLayerCache(layerId);
     state.markLayerUpdated(layerId);
   }
@@ -820,17 +877,15 @@ export class StudioEngine {
     const width = canvas.width;
     const height = canvas.height;
     
-    // Fetch exact pixel data without downscaling for a 1:1 perfect bounding box
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
 
     let minX = width, minY = height, maxX = -1, maxY = -1;
 
-    // Fast iteration to find exact non-transparent boundaries
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const alpha = data[(y * width + x) * 4 + 3];
-        if (alpha > 5) { // Threshold for anti-aliasing and faint pixels
+        if (alpha > 5) { 
           if (x < minX) minX = x;
           if (x > maxX) maxX = x;
           if (y < minY) minY = y;
@@ -843,7 +898,6 @@ export class StudioEngine {
 
     const dpr = window.devicePixelRatio || 1;
 
-    // Return the perfect unscaled physical boundaries translated to CSS space
     return {
       x: minX / dpr,
       y: minY / dpr,

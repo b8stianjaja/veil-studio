@@ -1,3 +1,4 @@
+// src/services/AutoSaveService.ts
 import { get, set } from 'idb-keyval';
 import { StudioEngine } from '../core/StudioEngine';
 import { useSceneStore } from '../store/useSceneStore';
@@ -10,6 +11,7 @@ const AUTOSAVE_KEY = 'veil-autosave-project';
 export class AutoSaveService {
   private static saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private static isGenerating = false;
+  private static pendingSave = false; // Queue flag to prevent dropped saves
   private static initialized = false;
 
   static registerStoreSubscriptions() {
@@ -51,13 +53,31 @@ export class AutoSaveService {
     useCanvasStore.getState().setAutoSaveStatus('dirty');
 
     this.saveTimeout = setTimeout(() => {
-      this.performSave();
+      this.attemptSave();
     }, 5000);
+  }
+
+  // Orchestrator to handle the race condition
+  private static async attemptSave() {
+    if (this.isGenerating) {
+      this.pendingSave = true; // Queue the save for later
+      return;
+    }
+
+    this.isGenerating = true;
+    this.pendingSave = false;
+
+    await this.performSave();
+
+    this.isGenerating = false;
+
+    // If another change occurred during the previous save cycle, trigger again immediately
+    if (this.pendingSave) {
+      this.triggerAutoSave();
+    }
   }
   
   private static async performSave() {
-    if (this.isGenerating) return;
-    this.isGenerating = true;
     useCanvasStore.getState().setAutoSaveStatus('saving');
     
     try {
@@ -67,19 +87,24 @@ export class AutoSaveService {
       const animationState = useAnimationStore.getState();
       const engine = StudioEngine.getInstance();
       
+      // Async Blob conversion to prevent UI locking
       const layersData = await Promise.all(canvasState.layers.map(async (layer) => {
         const bufferCanvas = engine.getFrameBuffer(layer.id);
-        let buffer = '';
+        let buffer: Blob | null = null;
+        
         if (bufferCanvas) {
-          buffer = bufferCanvas.toDataURL('image/png'); 
+          buffer = await new Promise<Blob | null>((resolve) => {
+            bufferCanvas.toBlob((blob) => resolve(blob), 'image/png');
+          });
         }
+        
         return {
           ...layer,
           buffer
         };
       }));
       
-      const project: VeilProject = {
+      const project: any = { // Cast to any or update VeilProject types
         metadata: {
           version: '1.0.0',
           timestamp: new Date().toISOString()
@@ -110,8 +135,6 @@ export class AutoSaveService {
     } catch (e) {
       console.warn("Failed to auto-save project:", e);
       useCanvasStore.getState().setAutoSaveStatus('dirty');
-    } finally {
-      this.isGenerating = false;
     }
   }
   
