@@ -227,7 +227,7 @@ export const LayerSurface: React.FC = () => {
 const LayerCanvas: React.FC<{ layer: any, zIndex: number, visible: boolean, opacity: number }> = ({ layer, zIndex, visible, opacity }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  useEffect(() => {
+    useEffect(() => {
     if (canvasRef.current) {
       StudioEngine.getInstance().registerLayer(layer.id, canvasRef.current);
       if (layer.buffer) {
@@ -235,9 +235,9 @@ const LayerCanvas: React.FC<{ layer: any, zIndex: number, visible: boolean, opac
       }
     }
     return () => {
-      StudioEngine.getInstance().removeLayer(layer.id);
+      // OBJECTIVE 2 FIX: Only unregister from DOM mapping, preserve layerCache
+      StudioEngine.getInstance().unregisterLayer(layer.id);
     };
-    // FIX: Removed layer.buffer from the dependency array to prevent unmount loops
   }, [layer.id]);
 
   return (

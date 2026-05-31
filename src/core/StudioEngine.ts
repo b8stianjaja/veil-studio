@@ -8,7 +8,8 @@ import { getFlattenedRenderLayers } from '../utils/layerUtils';
 
 interface HistoryState {
   layerId: string;
-  blob: Blob | null; // MEMORY FIX: Replaced raw ImageData with compressed binary Blob
+  blob: Blob | null; 
+  status: 'pending' | 'ready' | 'error'; // OBJECTIVE 4: Track compression state
 }
 
 export class StudioEngine {
@@ -532,7 +533,6 @@ export class StudioEngine {
     const ctx = this.ctxs.get(activeLayerId);
     if (!canvas || !ctx) return;
 
-    // MEMORY FIX: Save initial state if empty
     if (this.history.length === 0) {
       this.pushToHistory(activeLayerId, canvas);
     }
@@ -547,6 +547,9 @@ export class StudioEngine {
     const data = imageData.data;
     const width = canvas.width;
     const height = canvas.height;
+
+    // OBJECTIVE 1 FIX: Global tracking array preventing stack overflow
+    const visited = new Uint8Array(width * height);
 
     const targetPos = (sy * width + sx) * 4;
     const tr = data[targetPos], tg = data[targetPos+1], tb = data[targetPos+2], ta = data[targetPos+3];
@@ -574,40 +577,44 @@ export class StudioEngine {
       let currX = cx;
       let currY = cy;
       let pos = (currY * width + currX) * 4;
+      let pixelIndex = currY * width + currX;
 
-      while (currY >= 0 && colorMatch(pos)) {
+      // Notice the added !visited checks
+      while (currY >= 0 && colorMatch(pos) && !visited[pixelIndex]) {
         currY--;
         pos -= width * 4;
+        pixelIndex -= width;
       }
       pos += width * 4;
+      pixelIndex += width;
       currY++;
 
       let reachLeft = false;
       let reachRight = false;
 
-      while (currY < height && colorMatch(pos)) {
+      while (currY < height && colorMatch(pos) && !visited[pixelIndex]) {
         setColor(pos);
+        visited[pixelIndex] = 1; // Mark as visited!
 
         if (currX > 0) {
-          if (colorMatch(pos - 4)) {
+          if (colorMatch(pos - 4) && !visited[pixelIndex - 1]) {
             if (!reachLeft) { stack.push([currX - 1, currY]); reachLeft = true; }
           } else if (reachLeft) { reachLeft = false; }
         }
 
         if (currX < width - 1) {
-          if (colorMatch(pos + 4)) {
+          if (colorMatch(pos + 4) && !visited[pixelIndex + 1]) {
             if (!reachRight) { stack.push([currX + 1, currY]); reachRight = true; }
           } else if (reachRight) { reachRight = false; }
         }
 
         currY++;
         pos += width * 4;
+        pixelIndex += width;
       }
     }
 
     ctx.putImageData(imageData, 0, 0);
-    
-    // MEMORY FIX: Push final state
     this.pushToHistory(activeLayerId, canvas);
     this.updateLayerCache(activeLayerId);
     state.markLayerUpdated(activeLayerId);
@@ -616,13 +623,13 @@ export class StudioEngine {
 
   // --- MEMORY-SAFE HISTORY SYSTEM ---
 
-  private pushToHistory(layerId: string, canvas: HTMLCanvasElement) {
+    private pushToHistory(layerId: string, canvas: HTMLCanvasElement) {
     if (this.historyPointer < this.history.length - 1) {
       this.history.splice(this.historyPointer + 1);
     }
 
-    // Push the state placeholder immediately to maintain strict ordering
-    const state: HistoryState = { layerId, blob: null };
+    // OBJECTIVE 4 FIX: Add status tracker
+    const state: HistoryState = { layerId, blob: null, status: 'pending' };
     this.history.push(state);
 
     if (this.history.length > this.maxHistory) {
@@ -631,24 +638,28 @@ export class StudioEngine {
       this.historyPointer++;
     }
 
-    // Fast synchronous copy to prevent user drawing over the blob processing
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = canvas.width;
     tempCanvas.height = canvas.height;
     const tCtx = tempCanvas.getContext('2d');
     if (tCtx) tCtx.drawImage(canvas, 0, 0);
 
-    // Async compression to prevent main thread blocking
     tempCanvas.toBlob((blob) => {
-      state.blob = blob;
-      tempCanvas.width = 0; // Release memory
+      if (blob) {
+        state.blob = blob;
+        state.status = 'ready';
+      } else {
+        state.status = 'error'; // Prevents infinite loop if compression crashes
+      }
+      tempCanvas.width = 0; 
       tempCanvas.height = 0;
     }, 'image/png');
   }
 
-  private applyHistoryState(state: HistoryState) {
-    if (!state.blob) {
-      // If the user hit undo faster than the compression finished, wait a frame
+    private applyHistoryState(state: HistoryState) {
+    if (state.status === 'error') return; // OBJECTIVE 4 FIX: Abort on failed blob
+
+    if (state.status === 'pending' || !state.blob) {
       requestAnimationFrame(() => this.applyHistoryState(state));
       return;
     }
@@ -667,7 +678,7 @@ export class StudioEngine {
         ctx.drawImage(img, 0, 0);
         ctx.restore();
         
-        URL.revokeObjectURL(url); // Prevent URL memory leaks
+        URL.revokeObjectURL(url);
         
         this.updateLayerCache(state.layerId);
         useCanvasStore.getState().markLayerUpdated(state.layerId);
@@ -970,6 +981,29 @@ export class StudioEngine {
       const canvas = this.getCompositeCanvas(includeBackground);
       if (!canvas) resolve(null);
       else canvas.toBlob((blob) => resolve(blob), 'image/png');
+    });
+  }
+  public unregisterLayer(id: string) {
+    this.canvasLayers.delete(id);
+    this.ctxs.delete(id);
+  }
+
+  // OBJECTIVE 3 FIX: Safe fallback method for Auto-Save when canvases are unmounted
+  public getLayerCacheBlob(layerId: string): Promise<Blob | null> {
+    return new Promise((resolve) => {
+      const cachedData = this.layerCache.get(layerId);
+      if (!cachedData) return resolve(null);
+      
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = cachedData.width;
+      tempCanvas.height = cachedData.height;
+      const ctx = tempCanvas.getContext('2d');
+      if (ctx) {
+        ctx.putImageData(cachedData, 0, 0);
+        tempCanvas.toBlob((blob) => resolve(blob), 'image/png');
+      } else {
+        resolve(null);
+      }
     });
   }
 }

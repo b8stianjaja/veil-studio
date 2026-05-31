@@ -87,7 +87,6 @@ export class AutoSaveService {
       const animationState = useAnimationStore.getState();
       const engine = StudioEngine.getInstance();
       
-      // Async Blob conversion to prevent UI locking
       const layersData = await Promise.all(canvasState.layers.map(async (layer) => {
         const bufferCanvas = engine.getFrameBuffer(layer.id);
         let buffer: Blob | null = null;
@@ -96,6 +95,9 @@ export class AutoSaveService {
           buffer = await new Promise<Blob | null>((resolve) => {
             bufferCanvas.toBlob((blob) => resolve(blob), 'image/png');
           });
+        } else {
+          // OBJECTIVE 3 FIX: If in 3D mode (canvases unmounted), fallback to LayerCache memory blob
+          buffer = await engine.getLayerCacheBlob(layer.id);
         }
         
         return {
