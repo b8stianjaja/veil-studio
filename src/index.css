@@ -94,3 +94,27 @@
     @apply bg-bg-panel/85 backdrop-blur-xl border border-border-subtle shadow-xl rounded-2xl; /* Increased rounding for a softer feel */
   }
 }
+
+/* --- react-colorful overrides --- */
+.react-colorful {
+  width: 180px !important;
+  height: 180px !important;
+}
+
+.react-colorful__saturation {
+  border-radius: 6px !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.react-colorful__pointer {
+  width: 16px !important;
+  height: 16px !important;
+  border: 2px solid var(--bg-panel) !important;
+  box-shadow: 0 0 0 1px var(--border-strong), 0 2px 4px rgba(0,0,0,0.2) !important;
+}
+
+.react-colorful__hue {
+  height: 14px !important;
+  border-radius: 4px !important;
+  margin-top: 12px;
+}

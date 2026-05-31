@@ -7,6 +7,7 @@ import { StudioEngine } from '../../core/StudioEngine';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { Accordion } from './Accordion';
+import { ColorPicker } from './ColorPicker';
 
 export const InspectorPanel: React.FC = () => {
   const workspace = useCanvasStore(state => state.workspace);
@@ -38,11 +39,9 @@ export const InspectorPanel: React.FC = () => {
         <Accordion title="Canvas Properties">
           <div className="flex flex-col gap-3">
             <span className="text-[10px] text-text-muted font-semibold tracking-widest uppercase mb-1 block">Workspace Background</span>
-            <input 
-              type="color" 
-              value={backgroundColor}
-              onChange={(e) => setBackgroundColor(e.target.value)}
-              className="w-full h-10 bg-bg-app cursor-pointer rounded-md border border-border-subtle hover:border-border-strong transition-colors"
+            <ColorPicker 
+              color={backgroundColor} 
+              onChange={(newColor) => setBackgroundColor(newColor)} 
             />
             <div className="mt-2 border-t border-border-subtle pt-3">
                <div className="grid grid-cols-2 gap-2">
@@ -388,12 +387,10 @@ export const InspectorPanel: React.FC = () => {
             <div className="space-y-3">
               <div>
                 <span className="text-[10px] text-text-muted mb-1 block">Color</span>
-                <input 
-                  type="color" 
-                  value={selectedNode.color}
-                  onChange={(e) => updateNode(selectedNode.id, { color: e.target.value })}
-                  className="w-full h-8 bg-bg-app cursor-pointer rounded-md border border-border-subtle hover:border-border-strong transition-colors"
-                />
+              <ColorPicker 
+                color={selectedNode.color} 
+                onChange={(newColor) => updateNode(selectedNode.id, { color: newColor })} 
+              />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -481,12 +478,10 @@ export const InspectorPanel: React.FC = () => {
           </div>
           <div>
              <span className="text-[10px] text-text-muted mb-1 block font-semibold tracking-widest uppercase">Light Color</span>
-             <input 
-               type="color" 
-               value={lights.color}
-               onChange={(e) => updateLighting({ color: e.target.value })}
-               className="w-full h-8 bg-bg-app cursor-pointer rounded-md border border-border-subtle hover:border-border-strong transition-colors"
-             />
+            <ColorPicker 
+              color={lights.color} 
+              onChange={(newColor) => updateLighting({ color: newColor })} 
+            />
           </div>
            <div>
              <span className="text-[10px] text-text-muted mb-1 block">Direction (XYZ)</span>
@@ -605,12 +600,10 @@ const TwoDControls = () => {
           </div>
           <div>
              <span className="text-[10px] text-text-muted mb-1 block font-semibold tracking-widest uppercase">Color</span>
-             <input 
-               type="color" 
-               value={referenceGrid.color}
-               onChange={(e) => setReferenceGrid({ color: e.target.value })}
-               className="w-full h-8 bg-bg-app cursor-pointer rounded-md border border-border-subtle hover:border-border-strong transition-colors"
-             />
+            <ColorPicker 
+              color={referenceGrid.color} 
+              onChange={(newColor) => setReferenceGrid({ color: newColor })} 
+            />
           </div>
         </div>
       </Accordion>
@@ -668,12 +661,10 @@ const TwoDControls = () => {
           </div>
           <div>
              <span className="text-[10px] text-text-muted mb-1 block">Color</span>
-             <input 
-               type="color" 
-               value={brushColor}
-               onChange={(e) => setBrushSettings({ color: e.target.value })}
-               className="w-full h-8 bg-bg-app cursor-pointer rounded-md border border-border-subtle hover:border-border-strong transition-colors"
-             />
+              <ColorPicker 
+                color={brushColor} 
+                onChange={(newColor) => setBrushSettings({ color: newColor })} 
+              />
           </div>
         </div>
       </Accordion>
