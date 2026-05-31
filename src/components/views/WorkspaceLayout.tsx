@@ -298,10 +298,39 @@ export const WorkspaceLayout: React.FC = () => {
   }, []);
 
   const [isPanningActive, setIsPanningActive] = useState(false);
+  const [isZoomingActive, setIsZoomingActive] = useState(false);
+  const zoomStart = useRef<{ startX: number, pointerX: number, pointerY: number, startZoom: number, startPanX: number, startPanY: number } | null>(null);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (tool === 'PAN' || e.button === 1) { 
-      if (e.button === 1) e.preventDefault(); 
+    // Blur any active inputs to prevent UI shifting
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    // 1. ZOOM Logic: Triggered by Alt + Pen Drag OR Ctrl + Space + Pen Drag
+    if (e.altKey || (tool === 'PAN' && (e.ctrlKey || e.metaKey))) {
+      e.preventDefault();
+      setIsZoomingActive(true);
+      
+      const rect = viewportRef.current?.getBoundingClientRect();
+      const pointerX = rect ? e.clientX - rect.left : e.clientX;
+      const pointerY = rect ? e.clientY - rect.top : e.clientY;
+
+      zoomStart.current = {
+        startX: e.clientX,
+        pointerX,
+        pointerY,
+        startZoom: localTransform.current.z,
+        startPanX: localTransform.current.x,
+        startPanY: localTransform.current.y
+      };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // 2. PAN Logic: Triggered by Pan Tool OR Middle Click OR Right Click (Pen Barrel Button)
+    if (tool === 'PAN' || e.button === 1 || e.button === 2) { 
+      e.preventDefault(); 
       setIsPanningActive(true);
       panStart.current = {
         x: e.clientX,
@@ -312,10 +341,40 @@ export const WorkspaceLayout: React.FC = () => {
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
+    
+    // 3. Paint/Draw
     InputInterceptor.handlePointerDown(e, workspace, tool, projectConfig.width, projectConfig.height);
   };
   
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Scrubby Zoom Math
+    if (zoomStart.current) {
+      const dx = e.clientX - zoomStart.current.startX;
+      // Fine-tuned zoom speed for horizontal pen dragging
+      const zoomDelta = Math.exp(dx * 0.008); 
+      const newZoom = Math.min(Math.max(0.05, zoomStart.current.startZoom * zoomDelta), 50);
+      
+      const zoomRatio = newZoom / zoomStart.current.startZoom;
+      
+      // Calculate offset so the canvas zooms natively toward the initial pointer location
+      localTransform.current.x = zoomStart.current.pointerX - (zoomStart.current.pointerX - zoomStart.current.startPanX) * zoomRatio;
+      localTransform.current.y = zoomStart.current.pointerY - (zoomStart.current.pointerY - zoomStart.current.startPanY) * zoomRatio;
+      localTransform.current.z = newZoom;
+      
+      if (canvasWrapperRef.current) {
+        canvasWrapperRef.current.style.transform = `translate(${localTransform.current.x}px, ${localTransform.current.y}px) scale(${localTransform.current.z})`;
+      }
+
+      clearTimeout((window as any).panTimer);
+      (window as any).panTimer = setTimeout(() => {
+        const state = useCanvasStore.getState();
+        state.setPan({ x: localTransform.current.x, y: localTransform.current.y });
+        state.setZoom(localTransform.current.z);
+      }, 100);
+
+      return;
+    }
+
     if (panStart.current) {
       const dx = e.clientX - panStart.current.x;
       const dy = e.clientY - panStart.current.y;
@@ -335,23 +394,31 @@ export const WorkspaceLayout: React.FC = () => {
 
       return;
     }
+    
     InputInterceptor.handlePointerMove(e, workspace, tool, projectConfig.width, projectConfig.height);
   };
   
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (zoomStart.current) {
+      setIsZoomingActive(false);
+      zoomStart.current = null;
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      return;
+    }
+
     if (panStart.current) {
       setIsPanningActive(false);
       panStart.current = null;
-      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      }
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
       return;
     }
+    
     InputInterceptor.handlePointerUp(e, workspace, tool);
   };
 
   const getCursor = () => {
-    if (tool === 'PAN') return isPanningActive ? 'grabbing' : 'grab';
+    if (isZoomingActive) return 'ew-resize'; // Shows horizontal resize for Scrubby Zoom
+    if (tool === 'PAN' || isPanningActive) return isPanningActive ? 'grabbing' : 'grab';
     if (workspace === 'PAINTING') {
       if (['BRUSH', 'ERASER'].includes(tool)) return 'none';
       if (['EYEDROPPER', 'SHAPE_RECT', 'SHAPE_CIRCLE', 'SHAPE_LINE'].includes(tool)) return 'crosshair';
@@ -362,8 +429,11 @@ export const WorkspaceLayout: React.FC = () => {
   };
 
   return (
-    <div ref={layoutRef} className="w-full h-[100dvh] bg-bg-app text-text-primary flex flex-col font-sans overflow-hidden">
-      
+    <div 
+      ref={layoutRef} 
+      className="w-full h-[100dvh] bg-bg-app text-text-primary flex flex-col font-sans overflow-hidden"
+      onContextMenu={(e) => e.preventDefault()} /* <--- ADD THIS HERE */
+    > 
       <BrushCursorOverlay />
 
       {/* TOP NAVIGATION BAR */}

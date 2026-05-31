@@ -53,8 +53,19 @@
 @layer base {
   body {
     @apply bg-bg-app text-text-primary transition-colors duration-300 antialiased;
-    overscroll-behavior: none; /* Add this to prevent elastic scroll/pull-to-refresh */ 
+    overscroll-behavior: none; 
+    touch-action: none; /* Prevents all default browser gestures (pull to refresh, edge swipes) */
+    user-select: none; /* Stops accidental text highlighting */
+    -webkit-user-select: none;
+    -webkit-user-drag: none; /* Stops accidental icon/image dragging */
   }
+  
+  /* Re-enable selection only inside actual text inputs */
+  input[type="text"], input[type="number"], textarea {
+    user-select: auto;
+    -webkit-user-select: auto;
+  }
+
   input[type="range"] {
     @apply appearance-none bg-transparent w-full cursor-pointer;
   }

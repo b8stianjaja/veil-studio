@@ -14,6 +14,17 @@ const DRAG_TOOLS: ToolType[] = [
 
 export class InputInterceptor {
   
+  // Helper to detect hardware pen eraser
+  private static getEffectiveTool(e: React.PointerEvent<HTMLDivElement>, tool: ToolType): ToolType {
+    if (e.pointerType === 'pen') {
+      // button 5 is standard for eraser tip on down, buttons 32 is the bitmask during move
+      if (e.button === 5 || (e.buttons & 32) !== 0) {
+        return 'ERASER';
+      }
+    }
+    return tool;
+  }
+
   static handlePointerDown(
     e: React.PointerEvent<HTMLDivElement>, 
     workspace: WorkspaceMode, 
@@ -21,8 +32,11 @@ export class InputInterceptor {
     configWidth: number,
     configHeight: number
   ) {
-    if (workspace === 'PAINTING' && INTERACTIVE_TOOLS.includes(tool)) {
-      if (e.button !== 0) return; 
+    const effectiveTool = this.getEffectiveTool(e, tool);
+
+    if (workspace === 'PAINTING' && INTERACTIVE_TOOLS.includes(effectiveTool)) {
+      // Allow standard left click (0) OR the hardware eraser tip (5)
+      if (e.button !== 0 && e.button !== 5) return; 
       e.stopPropagation();
       
       const engine = StudioEngine.getInstance();
@@ -33,14 +47,13 @@ export class InputInterceptor {
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       
-      if (tool === 'MOVE_2D') {
+      if (effectiveTool === 'MOVE_2D') {
         e.currentTarget.setPointerCapture(e.pointerId);
         engine.startMove(x, y);
-      } else if (tool === 'BUCKET' || tool === 'MAGIC_WAND') {
+      } else if (effectiveTool === 'BUCKET' || effectiveTool === 'MAGIC_WAND') {
         engine.floodFill(x, y);
       } else {
         e.currentTarget.setPointerCapture(e.pointerId);
-        // Extract stylus pressure, defaulting to 0.5 if using a mouse
         const pressure = e.pressure !== undefined ? e.pressure : 0.5;
         engine.startStroke(x, y, pressure);
       }
@@ -54,7 +67,9 @@ export class InputInterceptor {
     configWidth: number,
     configHeight: number
   ) {
-    if (workspace === 'PAINTING' && DRAG_TOOLS.includes(tool)) {
+    const effectiveTool = this.getEffectiveTool(e, tool);
+
+    if (workspace === 'PAINTING' && DRAG_TOOLS.includes(effectiveTool)) {
       if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
       
       e.stopPropagation();
@@ -66,11 +81,9 @@ export class InputInterceptor {
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       
-      if (tool === 'MOVE_2D') {
-        // Passing shiftKey for proportional scaling
+      if (effectiveTool === 'MOVE_2D') {
         engine.continueMove(x, y, e.shiftKey);
       } else {
-        // Extract stylus pressure for the ongoing stroke
         const pressure = e.pressure !== undefined ? e.pressure : 0.5;
         engine.continueStroke(x, y, pressure);
       }
@@ -82,14 +95,16 @@ export class InputInterceptor {
     workspace: WorkspaceMode, 
     tool: ToolType
   ) {
-    if (workspace === 'PAINTING' && DRAG_TOOLS.includes(tool)) {
+    const effectiveTool = this.getEffectiveTool(e, tool);
+
+    if (workspace === 'PAINTING' && DRAG_TOOLS.includes(effectiveTool)) {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
       }
       e.stopPropagation();
       const engine = StudioEngine.getInstance();
       
-      if (tool === 'MOVE_2D') {
+      if (effectiveTool === 'MOVE_2D') {
         engine.endMove();
       } else {
         engine.endStroke();
