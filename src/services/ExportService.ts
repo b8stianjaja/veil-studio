@@ -10,16 +10,11 @@ export class ExportService {
       const text = await file.text();
       const project: VeilProject = JSON.parse(text);
       
-      if (!project.metadata || !project.scene || !project.layers) {
-        throw new Error("Invalid project file");
+      if (!project.metadata || !project.scene || !project.layers || !project.canvas) {
+        throw new Error("Invalid or corrupted project file.");
       }
       
-      useSceneStore.getState().restoreState(
-        project.scene.nodes, 
-        project.scene.lights,
-        undefined,
-        project.scene.camera
-      );
+      useSceneStore.getState().restoreState(project.scene);
       
       if (project.animation) {
         useAnimationStore.getState().restoreState(
@@ -29,19 +24,21 @@ export class ExportService {
         );
       }
       
-      if (project.canvas?.width && project.canvas?.height) {
-        useCanvasStore.getState().setProjectConfig({ width: project.canvas.width, height: project.canvas.height });
+      if (project.canvas.width && project.canvas.height) {
         StudioEngine.getInstance().resizeAllLayers(project.canvas.width, project.canvas.height);
       }
       
-      // Delaying the restore slightly ensures the DOM has resized
+      useCanvasStore.getState().restoreState(project.canvas, project.layers);
+      
+      // Delaying the engine paint slightly ensures React has mounted the canvases
       setTimeout(() => {
-        useCanvasStore.getState().restoreState(
-          project.layers, 
-          project.canvas?.backgroundColor,
-          project.canvas?.isSpritesheetMode // FIX: Was previously missing, causing spritesheets to break!
-        );
-      }, 50);
+        const engine = StudioEngine.getInstance();
+        project.layers.forEach(layer => {
+          if (layer.buffer) {
+            engine.restoreLayerBuffer(layer.id, layer.buffer);
+          }
+        });
+      }, 100);
       
     } catch (e) {
       console.error("Failed to import project:", e);
@@ -65,7 +62,6 @@ export class ExportService {
           buffer: dataUrl 
         });
         
-        // Wait for React to map the new canvas to the DOM before restoring buffer
         setTimeout(() => {
           StudioEngine.getInstance().restoreLayerBuffer(activeId, dataUrl);
         }, 100);
@@ -86,26 +82,39 @@ export class ExportService {
       if (bufferCanvas) {
         buffer = bufferCanvas.toDataURL('image/png');
       }
-      return {
-        ...layer,
-        buffer
-      };
+      return { ...layer, buffer };
     }));
     
     const project: VeilProject = {
-      metadata: {
-        version: '1.0.0',
-        timestamp: new Date().toISOString()
-      },
+      metadata: { version: '1.0.0', timestamp: new Date().toISOString() },
       canvas: {
         width: canvasState.projectConfig.width,
         height: canvasState.projectConfig.height,
-        backgroundColor: canvasState.backgroundColor
+        backgroundColor: canvasState.backgroundColor,
+        isSpritesheetMode: canvasState.isSpritesheetMode,
+        workspace: canvasState.workspace,
+        theme: canvasState.theme,
+        tool: canvasState.tool,
+        brushSize: canvasState.brushSize,
+        brushColor: canvasState.brushColor,
+        brushOpacity: canvasState.brushOpacity,
+        brushHardness: canvasState.brushHardness,
+        brushFlow: canvasState.brushFlow,
+        globalOpacity: canvasState.globalOpacity,
+        symmetryX: canvasState.symmetryX,
+        symmetryY: canvasState.symmetryY,
+        showGrid: canvasState.showGrid,
+        referenceGrid: canvasState.referenceGrid,
+        zoom: canvasState.zoom,
+        pan: canvasState.pan,
+        activeLayerId: canvasState.activeLayerId
       },
       scene: {
         nodes: sceneState.nodes,
         lights: sceneState.lights,
-        camera: sceneState.camera
+        environment: sceneState.environment,
+        camera: sceneState.camera,
+        savedViews: sceneState.savedViews
       },
       animation: {
         rows: animationState.rows,

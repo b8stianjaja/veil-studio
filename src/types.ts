@@ -1,10 +1,8 @@
 export type WorkspaceMode = 'MODELING' | 'PAINTING';
 
 export type ToolType = 
-  // Painting Suite
   | 'BRUSH' | 'ERASER' | 'PAN' | 'EYEDROPPER' | 'BUCKET' | 'SHAPE_LINE' | 'SHAPE_RECT' | 'SHAPE_CIRCLE' | 'SELECT_2D'
-  | 'MAGIC_WAND' | 'SMUDGE' | 'BLUR' | 'MOVE_2D' // Added MOVE_2D
-  // Modeling Suite
+  | 'MAGIC_WAND' | 'SMUDGE' | 'BLUR' | 'MOVE_2D'
   | 'ORBIT' | 'SELECT' | 'ROTATE' | 'SCALE' | 'TRANSFORM_GIZMO' | 'CREATE_PRIMITIVE';
 
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten' | 'color-dodge' | 'color-burn' | 'hard-light' | 'soft-light' | 'difference' | 'exclusion' | 'hue' | 'saturation' | 'color' | 'luminosity';
@@ -65,7 +63,8 @@ export interface LayerConfig {
   order: number;
   visible: boolean;
   opacity: number;
-  buffer?: string | Blob | null;  name: string;
+  buffer?: string | Blob | null;  
+  name: string;
   locked?: boolean;
   blendMode?: BlendMode;
   type?: 'LAYER' | 'FOLDER';
@@ -81,14 +80,31 @@ export interface VeilProject {
   canvas: {
     width: number;
     height: number;
-    backgroundColor?: string;
-    isSpritesheetMode?: boolean;
+    backgroundColor: string;
+    isSpritesheetMode: boolean;
+    workspace: WorkspaceMode;
+    theme: 'dark' | 'light';
+    tool: ToolType;
+    brushSize: number;
+    brushColor: string;
+    brushOpacity: number;
+    brushHardness: number;
+    brushFlow: number;
+    globalOpacity: number;
+    symmetryX: boolean;
+    symmetryY: boolean;
+    showGrid: boolean;
+    referenceGrid: { show: boolean; rows: number; cols: number; color: string; opacity: number; };
+    zoom: number;
+    pan: { x: number; y: number };
+    activeLayerId: string | null;
   };
   scene: {
     nodes: SceneNode[];
     lights: LightingConfig;
+    environment: EnvironmentConfig;
     camera: CameraConfig;
-    savedViews?: SavedCameraView[]; // <-- ADD THIS LINE
+    savedViews: SavedCameraView[];
   };
   animation: {
     rows: number;

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { SceneNode, LightingConfig, EnvironmentConfig, CameraConfig, SavedCameraView } from '../types';
+import { SceneNode, LightingConfig, EnvironmentConfig, CameraConfig, SavedCameraView, VeilProject } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface SceneState {
@@ -10,6 +10,8 @@ interface SceneState {
   selectedNodeId: string | null;
   savedViews: SavedCameraView[];
   saveViewRequest: { tick: number, name: string };
+  cameraResetTick: number;
+
   addNode: (type: SceneNode['type']) => void;
   duplicateNode: (id: string) => string | null;
   updateNode: (id: string, updates: Partial<SceneNode>) => void;
@@ -19,12 +21,13 @@ interface SceneState {
   updateLighting: (updates: Partial<LightingConfig>) => void;
   updateEnvironment: (updates: Partial<EnvironmentConfig>) => void;
   updateCamera: (updates: Partial<CameraConfig>) => void;
-  restoreState: (nodes: SceneNode[], lights: LightingConfig, environment?: EnvironmentConfig, camera?: CameraConfig, savedViews?: SavedCameraView[]) => void;  cameraResetTick: number;
   triggerCameraReset: () => void;
   requestSaveView: (name: string) => void;
   addSavedView: (view: SavedCameraView) => void;
   removeSavedView: (id: string) => void;
   applySavedView: (id: string) => void;
+  
+  restoreState: (sceneData: Partial<VeilProject['scene']>) => void;
 }
 
 export const useSceneStore = create<SceneState>((set) => ({
@@ -47,13 +50,14 @@ export const useSceneStore = create<SceneState>((set) => ({
     near: 0.1,
     far: 2000,
     locked: false,
-    position: [5, 5, 5] as [number, number, number],
-    target: [0, 0, 0] as [number, number, number],
+    position: [5, 5, 5],
+    target: [0, 0, 0],
     zoom: 50
   },
   selectedNodeId: null,
   savedViews: [],
   saveViewRequest: { tick: 0, name: '' },
+  cameraResetTick: 0,
   
   addNode: (type) => set((state) => {
     const newId = uuidv4();
@@ -110,7 +114,6 @@ export const useSceneStore = create<SceneState>((set) => ({
     if (node?.locked && updates.locked === undefined) {
       return state;
     }
-
     return {
       nodes: state.nodes.map(n => n.id === id ? { ...n, ...updates } : n)
     };
@@ -133,49 +136,17 @@ export const useSceneStore = create<SceneState>((set) => ({
     selectedNodeId: null 
   })),
   
-  updateLighting: (updates) => set((state) => ({
-    lights: { ...state.lights, ...updates }
-  })),
-
-  updateEnvironment: (updates) => set((state) => ({
-    environment: { ...state.environment, ...updates }
-  })),
-
-  updateCamera: (updates) => set((state) => ({
-    camera: { ...state.camera, ...updates }
-  })),
-
-  restoreState: (nodes, lights, environment, camera, savedViews) => set((state) => ({ 
-    nodes, 
-    lights, 
-    environment: environment ?? state.environment,
-    camera: camera ?? state.camera,
-    savedViews: savedViews ?? state.savedViews,
-    selectedNodeId: null 
-  })),
-
-  cameraResetTick: 0,
+  updateLighting: (updates) => set((state) => ({ lights: { ...state.lights, ...updates } })),
+  updateEnvironment: (updates) => set((state) => ({ environment: { ...state.environment, ...updates } })),
+  updateCamera: (updates) => set((state) => ({ camera: { ...state.camera, ...updates } })),
+  triggerCameraReset: () => set((state) => ({ cameraResetTick: state.cameraResetTick + 1 })),
+  requestSaveView: (name) => set(state => ({ saveViewRequest: { tick: state.saveViewRequest.tick + 1, name } })),
+  addSavedView: (view) => set(state => ({ savedViews: [...state.savedViews, view] })),
+  removeSavedView: (id) => set(state => ({ savedViews: state.savedViews.filter(v => v.id !== id) })),
   
-  triggerCameraReset: () => set((state) => ({ 
-    cameraResetTick: state.cameraResetTick + 1 
-  })),
-
-  requestSaveView: (name) => set(state => ({
-    saveViewRequest: { tick: state.saveViewRequest.tick + 1, name }
-  })),
-
-  addSavedView: (view) => set(state => ({
-    savedViews: [...state.savedViews, view]
-  })),
-
-  removeSavedView: (id) => set(state => ({
-    savedViews: state.savedViews.filter(v => v.id !== id)
-  })),
-
   applySavedView: (id) => set(state => {
     const view = state.savedViews.find(v => v.id === id);
     if (!view) return state;
-    
     return {
       camera: {
         ...state.camera,
@@ -186,5 +157,16 @@ export const useSceneStore = create<SceneState>((set) => ({
       },
       cameraResetTick: state.cameraResetTick + 1
     };
-  })
+  }),
+
+  restoreState: (sceneData) => set((state) => ({
+    ...state,
+    nodes: sceneData.nodes || [],
+    lights: { ...state.lights, ...(sceneData.lights || {}) },
+    environment: { ...state.environment, ...(sceneData.environment || {}) },
+    camera: { ...state.camera, ...(sceneData.camera || {}) },
+    savedViews: sceneData.savedViews || [],
+    selectedNodeId: null,
+    cameraResetTick: state.cameraResetTick + 1
+  }))
 }));

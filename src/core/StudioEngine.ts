@@ -9,7 +9,7 @@ import { getFlattenedRenderLayers } from '../utils/layerUtils';
 interface HistoryState {
   layerId: string;
   blob: Blob | null; 
-  status: 'pending' | 'ready' | 'error'; // OBJECTIVE 4: Track compression state
+  status: 'pending' | 'ready' | 'error';
 }
 
 export class StudioEngine {
@@ -19,13 +19,16 @@ export class StudioEngine {
   private threeCamera: THREE.PerspectiveCamera | null = null;
   private threeScene: THREE.Scene | null = null;
   
-  // Persistent Layer Cache to survive React unmounts during Workspace switches
-  private layerCache: Map<string, ImageData> = new Map();
+  private layerCache: Map<string, HTMLCanvasElement> = new Map();
 
   private isDrawing: boolean = false;
   private currentPath: { x: number, y: number, pressure: number }[] = [];
-  private strokeSnapshot: ImageData | null = null;
+  
+  private strokeSnapshot: HTMLCanvasElement | null = null;
   private rafId: number | null = null;
+
+  // Track the user's active selection to act as a clipping mask
+  private selectionPath: Path2D | null = null;
 
   private isMoving: boolean = false;
   private moveStartX: number = 0;
@@ -50,17 +53,45 @@ export class StudioEngine {
     return StudioEngine.instance;
   }
 
+  public pickColor(x: number, y: number) {
+    const canvas = this.getCompositeCanvas(true);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    
+    const dpr = window.devicePixelRatio || 1;
+    const pixel = ctx.getImageData(x * dpr, y * dpr, 1, 1).data;
+    
+    if (pixel[3] === 0) return;
+
+    const rgbToHex = (r: number, g: number, b: number) => {
+      return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    };
+
+    const hex = rgbToHex(pixel[0], pixel[1], pixel[2]);
+    useCanvasStore.getState().setBrushSettings({ color: hex });
+  }
+
   private renderLoop() {
     this.rafId = requestAnimationFrame(this.renderLoop);
     this.flushPaints();
   }
 
-  // Internal helper to keep the memory cache fresh
   private updateLayerCache(layerId: string) {
     const canvas = this.canvasLayers.get(layerId);
-    const ctx = this.ctxs.get(layerId);
-    if (canvas && ctx) {
-      this.layerCache.set(layerId, ctx.getImageData(0, 0, canvas.width, canvas.height));
+    if (!canvas) return;
+    
+    let cacheCanvas = this.layerCache.get(layerId);
+    if (!cacheCanvas) {
+      cacheCanvas = document.createElement('canvas');
+      this.layerCache.set(layerId, cacheCanvas);
+    }
+    cacheCanvas.width = canvas.width;
+    cacheCanvas.height = canvas.height;
+    const cCtx = cacheCanvas.getContext('2d');
+    if (cCtx) {
+      cCtx.clearRect(0, 0, cacheCanvas.width, cacheCanvas.height);
+      cCtx.drawImage(canvas, 0, 0);
     }
   }
 
@@ -88,7 +119,14 @@ export class StudioEngine {
     }
     
     if (this.strokeSnapshot) {
-      ctx.putImageData(this.strokeSnapshot, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(this.strokeSnapshot, 0, 0);
+    }
+    
+    ctx.save();
+
+    if (this.selectionPath && state.tool !== 'SELECT_2D') {
+      ctx.clip(this.selectionPath);
     }
     
     ctx.lineCap = 'round';
@@ -109,8 +147,6 @@ export class StudioEngine {
     ctx.strokeStyle = brushStr;
     ctx.globalCompositeOperation = state.tool === 'ERASER' ? 'destination-out' : 'source-over';
     
-    ctx.save();
-    
     const drawPath = (transform?: { scaleX: number, scaleY: number, transX: number, transY: number }) => {
       if (this.currentPath.length === 0) return;
       
@@ -121,7 +157,6 @@ export class StudioEngine {
       
       const p = this.currentPath.map(applyT);
       
-      // PERFECT-FREEHAND INTEGRATION
       if (state.tool === 'BRUSH' || state.tool === 'ERASER') {
         const strokePoints = getStroke(p.map(pt => [pt.x, pt.y, pt.pressure]), {
           size: state.brushSize,
@@ -145,11 +180,10 @@ export class StudioEngine {
         return; 
       }
       
-      // FALLBACK FOR GEOMETRIC SHAPES
       if (this.currentPath.length < 2) return;
       ctx.beginPath();
       
-      if (state.tool === 'SHAPE_RECT') {
+      if (state.tool === 'SHAPE_RECT' || state.tool === 'SELECT_2D') {
         const start = p[0];
         const end = p[p.length - 1];
         ctx.rect(start.x, start.y, end.x - start.x, end.y - start.y);
@@ -177,12 +211,20 @@ export class StudioEngine {
           ctx.lineTo(p[1].x, p[1].y);
         }
       }
-      ctx.stroke();
+
+      if (state.tool === 'SELECT_2D') {
+        ctx.strokeStyle = '#00ffff';
+        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else {
+        ctx.stroke();
+      }
     };
 
     drawPath();
 
-    if (canvas && (state.symmetryX || state.symmetryY)) {
+    if (canvas && (state.symmetryX || state.symmetryY) && state.tool !== 'SELECT_2D') {
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.width / dpr; 
       const h = canvas.height / dpr;
@@ -213,22 +255,27 @@ export class StudioEngine {
     canvas.width = config.width * dpr;
     canvas.height = config.height * dpr;
     
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const ctx = canvas.getContext('2d', { desynchronized: true });
     if (ctx) {
       ctx.scale(dpr, dpr);
       this.ctxs.set(id, ctx);
 
-      const cached = this.layerCache.get(id);
-      if (cached) {
+      const cachedCanvas = this.layerCache.get(id);
+      if (cachedCanvas) {
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.putImageData(cached, 0, 0);
+        ctx.drawImage(cachedCanvas, 0, 0);
         ctx.restore();
       }
     }
     this.canvasLayers.set(id, canvas);
   }
   
+  public unregisterLayer(id: string) {
+    this.canvasLayers.delete(id);
+    this.ctxs.delete(id);
+  }
+
   public removeLayer(id: string) {
     const canvas = this.canvasLayers.get(id);
     if (canvas) {
@@ -255,7 +302,6 @@ export class StudioEngine {
     }
   }
 
-  // --- Transform Tool Engine ---
   public startMove(x: number, y: number) {
     const state = useCanvasStore.getState();
     if (!state.activeLayerId) return;
@@ -270,7 +316,6 @@ export class StudioEngine {
     this.startBounds = this.getLayerContentBounds(state.activeLayerId);
     if (!this.startBounds) return; 
 
-    // MEMORY FIX: Only save initial state if history is empty
     if (this.history.length === 0) {
       this.pushToHistory(state.activeLayerId, canvas);
     }
@@ -354,85 +399,29 @@ export class StudioEngine {
     const ratio = this.startBounds.w / this.startBounds.h;
 
     switch (this.transformType) {
-      case 'translate':
-        newBox.x += dx;
-        newBox.y += dy;
-        break;
-      case 'se':
-        newBox.w += dx;
-        if (shiftKey) newBox.h = newBox.w / ratio;
-        else newBox.h += dy;
-        break;
+      case 'translate': newBox.x += dx; newBox.y += dy; break;
+      case 'se': newBox.w += dx; if (shiftKey) newBox.h = newBox.w / ratio; else newBox.h += dy; break;
       case 'nw':
-        newBox.x += dx;
-        newBox.w -= dx;
-        if (shiftKey) {
-          const dh = (newBox.w / ratio) - this.startBounds.h;
-          newBox.h += dh;
-          newBox.y -= dh;
-        } else {
-          newBox.y += dy;
-          newBox.h -= dy;
-        }
+        newBox.x += dx; newBox.w -= dx;
+        if (shiftKey) { const dh = (newBox.w / ratio) - this.startBounds.h; newBox.h += dh; newBox.y -= dh; } 
+        else { newBox.y += dy; newBox.h -= dy; }
         break;
       case 'ne':
         newBox.w += dx;
-        if (shiftKey) {
-          const dh = (newBox.w / ratio) - this.startBounds.h;
-          newBox.h += dh;
-          newBox.y -= dh;
-        } else {
-          newBox.y += dy;
-          newBox.h -= dy;
-        }
+        if (shiftKey) { const dh = (newBox.w / ratio) - this.startBounds.h; newBox.h += dh; newBox.y -= dh; } 
+        else { newBox.y += dy; newBox.h -= dy; }
         break;
-      case 'sw':
-        newBox.x += dx;
-        newBox.w -= dx;
-        if (shiftKey) newBox.h = newBox.w / ratio;
-        else newBox.h += dy;
-        break;
-      case 'e':
-        newBox.w += dx;
-        if (shiftKey) {
-          const dh = (newBox.w / ratio) - this.startBounds.h;
-          newBox.h += dh;
-          newBox.y -= dh / 2; 
-        }
-        break;
-      case 'w':
-        newBox.x += dx;
-        newBox.w -= dx;
-        if (shiftKey) {
-          const dh = (newBox.w / ratio) - this.startBounds.h;
-          newBox.h += dh;
-          newBox.y -= dh / 2;
-        }
-        break;
-      case 's':
-        newBox.h += dy;
-        if (shiftKey) {
-          const dw = (newBox.h * ratio) - this.startBounds.w;
-          newBox.w += dw;
-          newBox.x -= dw / 2;
-        }
-        break;
-      case 'n':
-        newBox.y += dy;
-        newBox.h -= dy;
-        if (shiftKey) {
-          const dw = (newBox.h * ratio) - this.startBounds.w;
-          newBox.w += dw;
-          newBox.x -= dw / 2;
-        }
-        break;
+      case 'sw': newBox.x += dx; newBox.w -= dx; if (shiftKey) newBox.h = newBox.w / ratio; else newBox.h += dy; break;
+      case 'e': newBox.w += dx; if (shiftKey) { const dh = (newBox.w / ratio) - this.startBounds.h; newBox.h += dh; newBox.y -= dh / 2; } break;
+      case 'w': newBox.x += dx; newBox.w -= dx; if (shiftKey) { const dh = (newBox.w / ratio) - this.startBounds.h; newBox.h += dh; newBox.y -= dh / 2; } break;
+      case 's': newBox.h += dy; if (shiftKey) { const dw = (newBox.h * ratio) - this.startBounds.w; newBox.w += dw; newBox.x -= dw / 2; } break;
+      case 'n': newBox.y += dy; newBox.h -= dy; if (shiftKey) { const dw = (newBox.h * ratio) - this.startBounds.w; newBox.w += dw; newBox.x -= dw / 2; } break;
     }
 
     const dpr = window.devicePixelRatio || 1;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0); 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
     ctx.drawImage(
       this.moveSnapshotCanvas, 
       0, 0, this.moveSnapshotCanvas.width, this.moveSnapshotCanvas.height,
@@ -451,7 +440,7 @@ export class StudioEngine {
     if (state.activeLayerId) {
       const canvas = this.canvasLayers.get(state.activeLayerId);
       if (canvas) {
-        this.pushToHistory(state.activeLayerId, canvas); // MEMORY FIX: Push final state
+        this.pushToHistory(state.activeLayerId, canvas);
         this.updateLayerCache(state.activeLayerId);
         state.markLayerUpdated(state.activeLayerId);
       }
@@ -459,7 +448,6 @@ export class StudioEngine {
     this.updateActiveLayerBounds();
   }
   
-  // --- DRAWING TOOL LOGIC ---
   public startStroke(x: number, y: number, pressure: number = 0.5) {
     const state = useCanvasStore.getState();
     const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
@@ -469,11 +457,20 @@ export class StudioEngine {
     const ctx = this.ctxs.get(state.activeLayerId!);
     
     if (canvas && ctx) {
-      // MEMORY FIX: Save initial baseline state only if history is empty
       if (this.history.length === 0) {
         this.pushToHistory(state.activeLayerId!, canvas);
       }
-      this.strokeSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      
+      if (!this.strokeSnapshot) {
+        this.strokeSnapshot = document.createElement('canvas');
+      }
+      this.strokeSnapshot.width = canvas.width;
+      this.strokeSnapshot.height = canvas.height;
+      const snapCtx = this.strokeSnapshot.getContext('2d');
+      if (snapCtx) {
+        snapCtx.clearRect(0, 0, canvas.width, canvas.height);
+        snapCtx.drawImage(canvas, 0, 0);
+      }
     }
 
     let nx = x;
@@ -503,18 +500,29 @@ export class StudioEngine {
   }
 
   public endStroke() {
+    const state = useCanvasStore.getState();
+
+    if (state.tool === 'SELECT_2D') {
+      if (this.currentPath.length >= 2) {
+         const p = new Path2D();
+         const start = this.currentPath[0];
+         const end = this.currentPath[this.currentPath.length - 1];
+         p.rect(start.x, start.y, end.x - start.x, end.y - start.y);
+         this.selectionPath = p;
+      } else {
+         this.selectionPath = null;
+      }
+    }
+
     this.isDrawing = false;
     this.flushPaints();
     this.currentPath = [];
-    this.strokeSnapshot = null;
 
-    const state = useCanvasStore.getState();
-    if (state.activeLayerId) {
+    if (state.activeLayerId && state.tool !== 'SELECT_2D') {
       state.markLayerUpdated(state.activeLayerId);
-      
       const canvas = this.canvasLayers.get(state.activeLayerId);
       if (canvas) {
-        this.pushToHistory(state.activeLayerId, canvas); // MEMORY FIX: Push final state
+        this.pushToHistory(state.activeLayerId, canvas);
         this.updateLayerCache(state.activeLayerId);
       }
     }
@@ -548,7 +556,6 @@ export class StudioEngine {
     const width = canvas.width;
     const height = canvas.height;
 
-    // OBJECTIVE 1 FIX: Global tracking array preventing stack overflow
     const visited = new Uint8Array(width * height);
 
     const targetPos = (sy * width + sx) * 4;
@@ -579,7 +586,6 @@ export class StudioEngine {
       let pos = (currY * width + currX) * 4;
       let pixelIndex = currY * width + currX;
 
-      // Notice the added !visited checks
       while (currY >= 0 && colorMatch(pos) && !visited[pixelIndex]) {
         currY--;
         pos -= width * 4;
@@ -594,7 +600,7 @@ export class StudioEngine {
 
       while (currY < height && colorMatch(pos) && !visited[pixelIndex]) {
         setColor(pos);
-        visited[pixelIndex] = 1; // Mark as visited!
+        visited[pixelIndex] = 1;
 
         if (currX > 0) {
           if (colorMatch(pos - 4) && !visited[pixelIndex - 1]) {
@@ -621,14 +627,11 @@ export class StudioEngine {
     this.updateActiveLayerBounds();
   }
 
-  // --- MEMORY-SAFE HISTORY SYSTEM ---
-
-    private pushToHistory(layerId: string, canvas: HTMLCanvasElement) {
+  private pushToHistory(layerId: string, canvas: HTMLCanvasElement) {
     if (this.historyPointer < this.history.length - 1) {
       this.history.splice(this.historyPointer + 1);
     }
 
-    // OBJECTIVE 4 FIX: Add status tracker
     const state: HistoryState = { layerId, blob: null, status: 'pending' };
     this.history.push(state);
 
@@ -649,15 +652,15 @@ export class StudioEngine {
         state.blob = blob;
         state.status = 'ready';
       } else {
-        state.status = 'error'; // Prevents infinite loop if compression crashes
+        state.status = 'error'; 
       }
       tempCanvas.width = 0; 
       tempCanvas.height = 0;
     }, 'image/png');
   }
 
-    private applyHistoryState(state: HistoryState) {
-    if (state.status === 'error') return; // OBJECTIVE 4 FIX: Abort on failed blob
+  private applyHistoryState(state: HistoryState) {
+    if (state.status === 'error') return; 
 
     if (state.status === 'pending' || !state.blob) {
       requestAnimationFrame(() => this.applyHistoryState(state));
@@ -704,7 +707,6 @@ export class StudioEngine {
     return this.canvasLayers.get(layerId);
   }
 
-  // OBJECTIVE 1 FIX INCLUDED: Supports both Legacy Base64 and New Blob architecture
   public restoreLayerBuffer(layerId: string, bufferData: string | Blob): Promise<void> {
     return new Promise((resolve) => {
       if (!bufferData) {
@@ -789,7 +791,6 @@ export class StudioEngine {
     const canvas = this.canvasLayers.get(layerId);
     const ctx = this.ctxs.get(layerId);
     if (canvas && ctx) {
-      // MEMORY FIX: Record state before clearing
       if (this.history.length === 0) this.pushToHistory(layerId, canvas);
 
       ctx.save();
@@ -983,27 +984,13 @@ export class StudioEngine {
       else canvas.toBlob((blob) => resolve(blob), 'image/png');
     });
   }
-  public unregisterLayer(id: string) {
-    this.canvasLayers.delete(id);
-    this.ctxs.delete(id);
-  }
 
-  // OBJECTIVE 3 FIX: Safe fallback method for Auto-Save when canvases are unmounted
   public getLayerCacheBlob(layerId: string): Promise<Blob | null> {
     return new Promise((resolve) => {
-      const cachedData = this.layerCache.get(layerId);
-      if (!cachedData) return resolve(null);
+      const cachedCanvas = this.layerCache.get(layerId);
+      if (!cachedCanvas) return resolve(null);
       
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = cachedData.width;
-      tempCanvas.height = cachedData.height;
-      const ctx = tempCanvas.getContext('2d');
-      if (ctx) {
-        ctx.putImageData(cachedData, 0, 0);
-        tempCanvas.toBlob((blob) => resolve(blob), 'image/png');
-      } else {
-        resolve(null);
-      }
+      cachedCanvas.toBlob((blob) => resolve(blob), 'image/png');
     });
   }
 }

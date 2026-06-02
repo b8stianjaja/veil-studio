@@ -1,4 +1,3 @@
-// src/services/AutoSaveService.ts
 import { get, set } from 'idb-keyval';
 import { StudioEngine } from '../core/StudioEngine';
 import { useSceneStore } from '../store/useSceneStore';
@@ -11,7 +10,7 @@ const AUTOSAVE_KEY = 'veil-autosave-project';
 export class AutoSaveService {
   private static saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private static isGenerating = false;
-  private static pendingSave = false; // Queue flag to prevent dropped saves
+  private static pendingSave = false; 
   private static initialized = false;
 
   static registerStoreSubscriptions() {
@@ -19,30 +18,21 @@ export class AutoSaveService {
     this.initialized = true;
 
     useCanvasStore.subscribe((state, prevState) => {
-      if (
-        state.layers !== prevState.layers || 
-        state.layerUpdateTick !== prevState.layerUpdateTick ||
-        state.backgroundColor !== prevState.backgroundColor
-      ) {
-        this.triggerAutoSave();
+      // 120HZ/RECURSION FIX: Prevent infinite loop! 
+      // If the store updated ONLY because the auto-save status changed, ignore it.
+      if (state.autoSaveStatus !== prevState.autoSaveStatus) {
+        if (
+          state.globalUpdateTick === prevState.globalUpdateTick && 
+          state.layerUpdateTick === prevState.layerUpdateTick
+        ) {
+          return; 
+        }
       }
+      this.triggerAutoSave();
     });
 
-    useSceneStore.subscribe((state, prevState) => {
-      if (state.nodes !== prevState.nodes || state.lights !== prevState.lights) {
-        this.triggerAutoSave();
-      }
-    });
-
-    useAnimationStore.subscribe((state, prevState) => {
-      if (
-        state.rows !== prevState.rows || 
-        state.columns !== prevState.columns || 
-        state.activeFrame !== prevState.activeFrame
-      ) {
-        this.triggerAutoSave();
-      }
-    });
+    useSceneStore.subscribe(() => { this.triggerAutoSave(); });
+    useAnimationStore.subscribe(() => { this.triggerAutoSave(); });
   }
   
   static triggerAutoSave() {
@@ -50,17 +40,20 @@ export class AutoSaveService {
       clearTimeout(this.saveTimeout);
     }
     
-    useCanvasStore.getState().setAutoSaveStatus('dirty');
+    // RECURSION FIX: Only dispatch a state update if it isn't already dirty
+    const state = useCanvasStore.getState();
+    if (state.autoSaveStatus === 'saved') {
+      state.setAutoSaveStatus('dirty');
+    }
 
     this.saveTimeout = setTimeout(() => {
       this.attemptSave();
     }, 5000);
   }
 
-  // Orchestrator to handle the race condition
   private static async attemptSave() {
     if (this.isGenerating) {
-      this.pendingSave = true; // Queue the save for later
+      this.pendingSave = true; 
       return;
     }
 
@@ -71,7 +64,6 @@ export class AutoSaveService {
 
     this.isGenerating = false;
 
-    // If another change occurred during the previous save cycle, trigger again immediately
     if (this.pendingSave) {
       this.triggerAutoSave();
     }
@@ -96,17 +88,13 @@ export class AutoSaveService {
             bufferCanvas.toBlob((blob) => resolve(blob), 'image/png');
           });
         } else {
-          // OBJECTIVE 3 FIX: If in 3D mode (canvases unmounted), fallback to LayerCache memory blob
           buffer = await engine.getLayerCacheBlob(layer.id);
         }
         
-        return {
-          ...layer,
-          buffer
-        };
+        return { ...layer, buffer };
       }));
       
-      const project: any = { // Cast to any or update VeilProject types
+      const project: VeilProject = { 
         metadata: {
           version: '1.0.0',
           timestamp: new Date().toISOString()
@@ -115,12 +103,30 @@ export class AutoSaveService {
           width: canvasState.projectConfig.width,
           height: canvasState.projectConfig.height,
           backgroundColor: canvasState.backgroundColor,
-          isSpritesheetMode: canvasState.isSpritesheetMode
+          isSpritesheetMode: canvasState.isSpritesheetMode,
+          workspace: canvasState.workspace,
+          theme: canvasState.theme,
+          tool: canvasState.tool,
+          brushSize: canvasState.brushSize,
+          brushColor: canvasState.brushColor,
+          brushOpacity: canvasState.brushOpacity,
+          brushHardness: canvasState.brushHardness,
+          brushFlow: canvasState.brushFlow,
+          globalOpacity: canvasState.globalOpacity,
+          symmetryX: canvasState.symmetryX,
+          symmetryY: canvasState.symmetryY,
+          showGrid: canvasState.showGrid,
+          referenceGrid: canvasState.referenceGrid,
+          zoom: canvasState.zoom,
+          pan: canvasState.pan,
+          activeLayerId: canvasState.activeLayerId
         },
         scene: {
           nodes: sceneState.nodes,
           lights: sceneState.lights,
-          camera: sceneState.camera
+          environment: sceneState.environment,
+          camera: sceneState.camera,
+          savedViews: sceneState.savedViews
         },
         animation: {
           rows: animationState.rows,
@@ -152,16 +158,11 @@ export class AutoSaveService {
   static async checkAndRestoreAutoSave(): Promise<boolean> {
     try {
       const project = await get<VeilProject>(AUTOSAVE_KEY);
-      if (!project) return false;
+      if (!project || !project.canvas || !project.scene) return false;
       
       console.log("Found auto-save, restoring...");
       
-      const sceneState = useSceneStore.getState();
-      sceneState.restoreState(project.scene.nodes, project.scene.lights);
-      
-      if (project.scene.camera && sceneState.updateCamera) {
-         sceneState.updateCamera(project.scene.camera);
-      }
+      useSceneStore.getState().restoreState(project.scene);
       
       if (project.animation) {
         useAnimationStore.getState().restoreState(
@@ -171,16 +172,20 @@ export class AutoSaveService {
         );
       }
       
-      if (project.canvas?.width && project.canvas?.height) {
-        useCanvasStore.getState().setProjectConfig({ width: project.canvas.width, height: project.canvas.height });
+      if (project.canvas.width && project.canvas.height) {
         StudioEngine.getInstance().resizeAllLayers(project.canvas.width, project.canvas.height);
       }
       
-      useCanvasStore.getState().restoreState(
-        project.layers, 
-        project.canvas?.backgroundColor,
-        project.canvas?.isSpritesheetMode
-      );
+      useCanvasStore.getState().restoreState(project.canvas, project.layers);
+
+      setTimeout(() => {
+        const engine = StudioEngine.getInstance();
+        project.layers.forEach(layer => {
+          if (layer.buffer) {
+             engine.restoreLayerBuffer(layer.id, layer.buffer);
+          }
+        });
+      }, 100);
       
       return true;
     } catch (e) {
