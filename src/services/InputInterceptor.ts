@@ -1,29 +1,21 @@
+// src/services/InputInterceptor.ts
+
 import { StudioEngine } from '../core/StudioEngine';
 import { useCanvasStore } from '../store/useCanvasStore';
 import { WorkspaceMode, ToolType } from '../types';
 
-const INTERACTIVE_TOOLS: ToolType[] = [
-  'BRUSH', 'ERASER', 'SMUDGE', 'BLUR', 
-  'BUCKET', 'MAGIC_WAND', 
-  'SHAPE_RECT', 'SHAPE_LINE', 'SHAPE_CIRCLE', 'MOVE_2D',
-  'EYEDROPPER', 'SELECT_2D'
-];
-
-const DRAG_TOOLS: ToolType[] = [
-  'BRUSH', 'ERASER', 'SMUDGE', 'BLUR',
-  'SHAPE_RECT', 'SHAPE_LINE', 'SHAPE_CIRCLE', 'MOVE_2D', 'SELECT_2D'
-];
+const FREEHAND_TOOLS: ToolType[] = ['BRUSH', 'ERASER', 'SMUDGE', 'BLUR'];
+const BOUNDING_TOOLS: ToolType[] = ['SHAPE_RECT', 'SHAPE_LINE', 'SHAPE_CIRCLE', 'SELECT_2D'];
+const INSTANT_TOOLS: ToolType[] = ['BUCKET', 'MAGIC_WAND', 'EYEDROPPER'];
 
 export class InputInterceptor {
   private static isShortcutListenerAttached = false;
 
-  // INITIALIZE GLOBAL SHORTCUTS
   static initShortcuts() {
     if (this.isShortcutListenerAttached) return;
     this.isShortcutListenerAttached = true;
 
     window.addEventListener('keydown', (e) => {
-      // Ignore if user is typing in a text field
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
       const state = useCanvasStore.getState();
@@ -43,27 +35,16 @@ export class InputInterceptor {
   
   private static getEffectiveTool(e: React.PointerEvent<HTMLDivElement>, tool: ToolType): ToolType {
     if (e.pointerType === 'pen') {
-      if (e.button === 5 || (e.buttons & 32) !== 0) {
-        return 'ERASER';
-      }
+      if (e.button === 5 || (e.buttons & 32) !== 0) return 'ERASER';
     }
-    // Alt key automatically triggers eyedropper temporarily 
-    if (e.altKey && (tool === 'BRUSH' || tool === 'ERASER')) {
-      return 'EYEDROPPER';
-    }
+    if (e.altKey && (tool === 'BRUSH' || tool === 'ERASER')) return 'EYEDROPPER';
     return tool;
   }
 
-  static handlePointerDown(
-    e: React.PointerEvent<HTMLDivElement>, 
-    workspace: WorkspaceMode, 
-    tool: ToolType,
-    configWidth: number,
-    configHeight: number
-  ) {
+  static handlePointerDown(e: React.PointerEvent<HTMLDivElement>, workspace: WorkspaceMode, tool: ToolType, configWidth: number, configHeight: number) {
     const effectiveTool = this.getEffectiveTool(e, tool);
 
-    if (workspace === 'PAINTING' && INTERACTIVE_TOOLS.includes(effectiveTool)) {
+    if (workspace === 'PAINTING') {
       if (e.button !== 0 && e.button !== 5) return; 
       e.stopPropagation();
       
@@ -71,35 +52,30 @@ export class InputInterceptor {
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const scaleX = configWidth / rect.width;
       const scaleY = configHeight / rect.height;
-      
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       
+      e.currentTarget.setPointerCapture(e.pointerId);
+
       if (effectiveTool === 'EYEDROPPER') {
         engine.pickColor(x, y);
       } else if (effectiveTool === 'MOVE_2D') {
-        e.currentTarget.setPointerCapture(e.pointerId);
         engine.startMove(x, y);
-      } else if (effectiveTool === 'BUCKET' || effectiveTool === 'MAGIC_WAND') {
+      } else if (INSTANT_TOOLS.includes(effectiveTool)) {
         engine.floodFill(x, y);
-      } else {
-        e.currentTarget.setPointerCapture(e.pointerId);
+      } else if (BOUNDING_TOOLS.includes(effectiveTool)) {
+        engine.startBoundingTool(x, y, effectiveTool);
+      } else if (FREEHAND_TOOLS.includes(effectiveTool)) {
         const pressure = e.pressure !== undefined ? e.pressure : 0.5;
         engine.startStroke(x, y, pressure);
       }
     }
   }
 
-  static handlePointerMove(
-    e: React.PointerEvent<HTMLDivElement>, 
-    workspace: WorkspaceMode, 
-    tool: ToolType,
-    configWidth: number,
-    configHeight: number
-  ) {
+  static handlePointerMove(e: React.PointerEvent<HTMLDivElement>, workspace: WorkspaceMode, tool: ToolType, configWidth: number, configHeight: number) {
     const effectiveTool = this.getEffectiveTool(e, tool);
 
-    if (workspace === 'PAINTING' && DRAG_TOOLS.includes(effectiveTool)) {
+    if (workspace === 'PAINTING') {
       if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
       e.stopPropagation();
       
@@ -107,44 +83,26 @@ export class InputInterceptor {
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const scaleX = configWidth / rect.width;
       const scaleY = configHeight / rect.height;
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
       
       if (effectiveTool === 'MOVE_2D') {
-        const x = (e.clientX - rect.left) * scaleX;
-        const y = (e.clientY - rect.top) * scaleY;
         engine.continueMove(x, y, e.shiftKey);
-      } else {
-        // 120HZ FIX: Capture high-fidelity hardware polling events between frames
-        const nativeEvent = e.nativeEvent;
-        if (nativeEvent.getCoalescedEvents) {
-          const events = nativeEvent.getCoalescedEvents();
-          if (events.length > 0) {
-            events.forEach(coalescedEvent => {
-              const x = (coalescedEvent.clientX - rect.left) * scaleX;
-              const y = (coalescedEvent.clientY - rect.top) * scaleY;
-              const pressure = coalescedEvent.pressure !== undefined ? coalescedEvent.pressure : 0.5;
-              engine.continueStroke(x, y, pressure);
-            });
-            return;
-          }
-        }
-        
-        // Fallback for older browsers
-        const x = (e.clientX - rect.left) * scaleX;
-        const y = (e.clientY - rect.top) * scaleY;
+      } else if (effectiveTool === 'EYEDROPPER') {
+        engine.pickColor(x, y); // Allows scrubbing to find color
+      } else if (BOUNDING_TOOLS.includes(effectiveTool)) {
+        engine.continueBoundingTool(x, y, e.shiftKey);
+      } else if (FREEHAND_TOOLS.includes(effectiveTool)) {
         const pressure = e.pressure !== undefined ? e.pressure : 0.5;
         engine.continueStroke(x, y, pressure);
       }
     }
   }
 
-  static handlePointerUp(
-    e: React.PointerEvent<HTMLDivElement>, 
-    workspace: WorkspaceMode, 
-    tool: ToolType
-  ) {
+  static handlePointerUp(e: React.PointerEvent<HTMLDivElement>, workspace: WorkspaceMode, tool: ToolType) {
     const effectiveTool = this.getEffectiveTool(e, tool);
 
-    if (workspace === 'PAINTING' && DRAG_TOOLS.includes(effectiveTool)) {
+    if (workspace === 'PAINTING') {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
       }
@@ -153,7 +111,9 @@ export class InputInterceptor {
       
       if (effectiveTool === 'MOVE_2D') {
         engine.endMove();
-      } else {
+      } else if (BOUNDING_TOOLS.includes(effectiveTool)) {
+        engine.endBoundingTool();
+      } else if (FREEHAND_TOOLS.includes(effectiveTool)) {
         engine.endStroke();
       }
     }

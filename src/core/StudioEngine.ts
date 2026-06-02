@@ -5,6 +5,7 @@ import { getStroke } from 'perfect-freehand';
 import { useCanvasStore } from '../store/useCanvasStore';
 import { useAnimationStore } from '../store/useAnimationStore';
 import { getFlattenedRenderLayers } from '../utils/layerUtils';
+import { ToolType } from '../types'; // <--- ADD THIS LINE
 
 interface HistoryState {
   layerId: string;
@@ -29,6 +30,9 @@ export class StudioEngine {
 
   // Track the user's active selection to act as a clipping mask
   private selectionPath: Path2D | null = null;
+
+  private boundingStartPoint: { x: number, y: number } | null = null;
+  private currentBoundingTool: ToolType | null = null;
 
   private isMoving: boolean = false;
   private moveStartX: number = 0;
@@ -118,10 +122,15 @@ export class StudioEngine {
       return;
     }
     
+    // --- FIX APPLIED HERE ---
     if (this.strokeSnapshot) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset to 1:1 physical pixel mapping
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(this.strokeSnapshot, 0, 0);
+      ctx.restore(); // Restore the dpr scaling for the current stroke
     }
+    // ------------------------
     
     ctx.save();
 
@@ -529,6 +538,118 @@ export class StudioEngine {
     this.updateActiveLayerBounds();
   }
 
+  public startBoundingTool(x: number, y: number, tool: ToolType) {
+    this.boundingStartPoint = { x, y };
+    this.currentBoundingTool = tool;
+    
+    const state = useCanvasStore.getState();
+    if (state.activeLayerId) {
+      const canvas = this.canvasLayers.get(state.activeLayerId);
+      if (canvas && this.history.length === 0) {
+        this.pushToHistory(state.activeLayerId, canvas);
+      }
+      
+      if (!this.strokeSnapshot) {
+        this.strokeSnapshot = document.createElement('canvas');
+      }
+      this.strokeSnapshot.width = canvas!.width;
+      this.strokeSnapshot.height = canvas!.height;
+      const snapCtx = this.strokeSnapshot.getContext('2d');
+      if (snapCtx) {
+        snapCtx.clearRect(0, 0, canvas!.width, canvas!.height);
+        snapCtx.drawImage(canvas!, 0, 0);
+      }
+    }
+  }
+
+  public continueBoundingTool(x: number, y: number, isShiftPressed: boolean) {
+    if (!this.boundingStartPoint || !this.currentBoundingTool) return;
+
+    const state = useCanvasStore.getState();
+    const activeLayerId = state.activeLayerId;
+    if (!activeLayerId) return;
+
+    const ctx = this.ctxs.get(activeLayerId);
+    const canvas = this.canvasLayers.get(activeLayerId);
+    if (!ctx || !canvas) return;
+
+    if (this.strokeSnapshot) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(this.strokeSnapshot, 0, 0);
+      ctx.restore();
+    }
+
+    let endX = x;
+    let endY = y;
+    const startX = this.boundingStartPoint.x;
+    const startY = this.boundingStartPoint.y;
+
+    if (isShiftPressed) {
+      const dx = endX - startX;
+      const dy = endY - startY;
+      const maxDist = Math.max(Math.abs(dx), Math.abs(dy));
+      endX = startX + maxDist * Math.sign(dx);
+      endY = startY + maxDist * Math.sign(dy);
+    }
+
+    ctx.save();
+    
+    if (this.currentBoundingTool === 'SELECT_2D') {
+      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(startX, startY, endX - startX, endY - startY);
+      
+      this.selectionPath = new Path2D();
+      this.selectionPath.rect(startX, startY, endX - startX, endY - startY);
+    } else {
+      ctx.strokeStyle = state.brushColor;
+      ctx.fillStyle = state.brushColor;
+      ctx.lineWidth = state.brushSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      ctx.beginPath();
+      if (this.currentBoundingTool === 'SHAPE_RECT') {
+        ctx.rect(startX, startY, endX - startX, endY - startY);
+        ctx.stroke();
+      } else if (this.currentBoundingTool === 'SHAPE_CIRCLE') {
+        const radius = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+        ctx.arc(startX, startY, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (this.currentBoundingTool === 'SHAPE_LINE') {
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      }
+    }
+    
+    ctx.restore();
+    this.updateLayerCache(activeLayerId);
+  }
+
+  public endBoundingTool() {
+    this.boundingStartPoint = null;
+    this.currentBoundingTool = null;
+    
+    const state = useCanvasStore.getState();
+    if (state.activeLayerId) {
+      const canvas = this.canvasLayers.get(state.activeLayerId);
+      if (canvas && this.strokeSnapshot) {
+        const snapCtx = this.strokeSnapshot.getContext('2d');
+        if (snapCtx) {
+          snapCtx.clearRect(0, 0, this.strokeSnapshot.width, this.strokeSnapshot.height);
+          snapCtx.drawImage(canvas, 0, 0);
+        }
+        this.pushToHistory(state.activeLayerId, canvas);
+        state.markLayerUpdated(state.activeLayerId);
+      }
+    }
+    this.updateActiveLayerBounds();
+  }
+
   public floodFill(x: number, y: number) {
     const state = useCanvasStore.getState();
     const activeLayerId = state.activeLayerId;
@@ -755,7 +876,7 @@ export class StudioEngine {
     });
   }
 
-  public resizeAllLayers(newWidth: number, newHeight: number) {
+    public resizeAllLayers(newWidth: number, newHeight: number) {
     const dpr = window.devicePixelRatio || 1;
     this.canvasLayers.forEach((canvas, id) => {
       const tempCanvas = document.createElement('canvas');
@@ -769,12 +890,17 @@ export class StudioEngine {
 
       const ctx = this.ctxs.get(id);
       if (ctx) {
+        // 1. Restore the permanent scale required by the engine for future paths!
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+        
+        // 2. Draw the backup safely without double-scaling
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.globalCompositeOperation = 'source-over';
-        ctx.scale(dpr, dpr);
         ctx.drawImage(tempCanvas, 0, 0);
         ctx.restore();
+        
         this.updateLayerCache(id);
       }
     });

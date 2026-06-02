@@ -28,11 +28,11 @@ const BrushCursorOverlay: React.FC = () => {
   const [pos, setPos] = useState({ x: -1000, y: -1000 });
   
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
       setPos({ x: e.clientX, y: e.clientY });
     };
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
+    window.addEventListener('pointermove', handlePointerMove);
+    return () => window.removeEventListener('pointermove', handlePointerMove);
   }, []);
 
   if (workspace !== 'PAINTING' || (tool !== 'BRUSH' && tool !== 'ERASER')) return null;
@@ -63,6 +63,9 @@ export const WorkspaceLayout: React.FC = () => {
 
   const [inspectorOpen, setInspectorOpen] = useState(window.innerWidth > 1024);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
+
+  const [isAltPressed, setIsAltPressed] = useState(false);
+  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
 
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const pan = useCanvasStore((state) => state.pan);
@@ -98,6 +101,19 @@ export const WorkspaceLayout: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [fileMenuOpen]);
+    
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      setIsAltPressed(e.altKey);
+      setIsCtrlPressed(e.ctrlKey || e.metaKey);
+    };
+    window.addEventListener('keydown', handleKey);
+    window.addEventListener('keyup', handleKey);
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      window.removeEventListener('keyup', handleKey);
+    }
+  }, []);
 
   const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -301,14 +317,23 @@ export const WorkspaceLayout: React.FC = () => {
   const [isZoomingActive, setIsZoomingActive] = useState(false);
   const zoomStart = useRef<{ startX: number, pointerX: number, pointerY: number, startZoom: number, startPanX: number, startPanY: number } | null>(null);
 
+  const [isResizingBrushActive, setIsResizingBrushActive] = useState(false);
+  const brushResizeStart = useRef<{ startX: number, startSize: number } | null>(null);
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Blur any active inputs to prevent UI shifting
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+
+    // 1. Scrubby Brush Size (Ctrl + Alt + Drag)
+    if (e.ctrlKey && e.altKey && workspace === 'PAINTING') {
+      e.preventDefault();
+      setIsResizingBrushActive(true);
+      brushResizeStart.current = { startX: e.clientX, startSize: useCanvasStore.getState().brushSize };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
     }
 
-    // 1. ZOOM Logic: Triggered by Alt + Pen Drag OR Ctrl + Space + Pen Drag
-    if (e.altKey || (tool === 'PAN' && (e.ctrlKey || e.metaKey))) {
+    // 2. ZOOM Logic: Triggered by Ctrl/Meta + Drag when in PAN tool
+    if (tool === 'PAN' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       setIsZoomingActive(true);
       
@@ -347,31 +372,10 @@ export const WorkspaceLayout: React.FC = () => {
   };
   
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Scrubby Zoom Math
-    if (zoomStart.current) {
-      const dx = e.clientX - zoomStart.current.startX;
-      // Fine-tuned zoom speed for horizontal pen dragging
-      const zoomDelta = Math.exp(dx * 0.008); 
-      const newZoom = Math.min(Math.max(0.05, zoomStart.current.startZoom * zoomDelta), 50);
-      
-      const zoomRatio = newZoom / zoomStart.current.startZoom;
-      
-      // Calculate offset so the canvas zooms natively toward the initial pointer location
-      localTransform.current.x = zoomStart.current.pointerX - (zoomStart.current.pointerX - zoomStart.current.startPanX) * zoomRatio;
-      localTransform.current.y = zoomStart.current.pointerY - (zoomStart.current.pointerY - zoomStart.current.startPanY) * zoomRatio;
-      localTransform.current.z = newZoom;
-      
-      if (canvasWrapperRef.current) {
-        canvasWrapperRef.current.style.transform = `translate(${localTransform.current.x}px, ${localTransform.current.y}px) scale(${localTransform.current.z})`;
-      }
-
-      clearTimeout((window as any).panTimer);
-      (window as any).panTimer = setTimeout(() => {
-        const state = useCanvasStore.getState();
-        state.setPan({ x: localTransform.current.x, y: localTransform.current.y });
-        state.setZoom(localTransform.current.z);
-      }, 100);
-
+    if (brushResizeStart.current) {
+      const dx = e.clientX - brushResizeStart.current.startX;
+      const newSize = Math.max(1, Math.min(200, Math.round(brushResizeStart.current.startSize + dx * 0.4)));
+      useCanvasStore.getState().setBrushSettings({ size: newSize });
       return;
     }
 
@@ -417,9 +421,11 @@ export const WorkspaceLayout: React.FC = () => {
   };
 
   const getCursor = () => {
-    if (isZoomingActive) return 'ew-resize'; // Shows horizontal resize for Scrubby Zoom
+    if (isResizingBrushActive) return 'ew-resize';
+    if (isZoomingActive || (tool === 'PAN' && isCtrlPressed)) return 'zoom-in';
     if (tool === 'PAN' || isPanningActive) return isPanningActive ? 'grabbing' : 'grab';
     if (workspace === 'PAINTING') {
+      if (isAltPressed && (tool === 'BRUSH' || tool === 'ERASER')) return 'crosshair';
       if (['BRUSH', 'ERASER'].includes(tool)) return 'none';
       if (['EYEDROPPER', 'SHAPE_RECT', 'SHAPE_CIRCLE', 'SHAPE_LINE'].includes(tool)) return 'crosshair';
       if (tool === 'MOVE_2D') return 'move';
@@ -715,21 +721,27 @@ export const WorkspaceLayout: React.FC = () => {
   );
 };
 
-const ToolButton = ({ icon, active, onClick, tooltip }: any) => (
-  <button
-    title={tooltip}
-    onClick={onClick}
-    className={`gsap-tool-btn relative w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 group ${
-      active 
-        ? 'bg-bg-active text-text-primary shadow-[0_2px_10px_rgba(0,0,0,0.1)] ring-1 ring-border-strong' 
-        : 'text-text-muted hover:text-text-secondary hover:bg-bg-hover'
-    }`}
-  >
-    {/* Active indicator bar */}
-    <div className={`absolute left-0 w-1 h-5 bg-accent rounded-r-full transition-all duration-300 ${active ? 'opacity-100 scale-100 shadow-[0_0_8px_var(--color-accent)]' : 'opacity-0 scale-50'}`} />
-    
-    <div className={`transform transition-transform duration-200 ${active ? 'scale-100' : 'group-hover:scale-110'}`}>
-      {icon}
-    </div>
-  </button>
-);
+const ToolButton = ({ icon, active, onClick, tooltip }: any) => {
+  const handleAction = (e: React.UIEvent) => {
+    e.preventDefault();
+    onClick();
+  };
+
+  return (
+    <button
+      title={tooltip}
+      onPointerDown={(e) => { if (e.pointerType === 'pen') handleAction(e); }}
+      onClick={(e) => { if ((e.nativeEvent as PointerEvent)?.pointerType !== 'pen') handleAction(e); }}
+      className={`gsap-tool-btn relative w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 group ${
+        active 
+          ? 'bg-bg-active text-text-primary shadow-[0_2px_10px_rgba(0,0,0,0.1)] ring-1 ring-border-strong' 
+          : 'text-text-muted hover:text-text-secondary hover:bg-bg-hover'
+      }`}
+    >
+      <div className={`absolute left-0 w-1 h-5 bg-accent rounded-r-full transition-all duration-300 ${active ? 'opacity-100 scale-100 shadow-[0_0_8px_var(--color-accent)]' : 'opacity-0 scale-50'}`} />
+      <div className={`transform transition-transform duration-200 ${active ? 'scale-100' : 'group-hover:scale-110'}`}>
+        {icon}
+      </div>
+    </button>
+  );
+};
