@@ -6,6 +6,7 @@ import { LayerSurface } from '../2d/LayerSurface';
 import { InspectorPanel } from '../ui/InspectorPanel';
 import { AnimationToolbar } from '../ui/AnimationToolbar';
 import { AnimationPreview } from '../ui/AnimationPreview';
+import { CanvasRulers } from '../ui/CanvasRulers';
 import { InputInterceptor } from '../../services/InputInterceptor';
 import { StudioEngine } from '../../core/StudioEngine';
 import { ExportService } from '../../services/ExportService';
@@ -13,7 +14,7 @@ import {
   Pen, Move3d, MousePointer2, Eraser, Focus, Maximize, RotateCw, Hand, 
   PanelRight, ChevronDown, Download, Upload, Save, FilePlus, Sun, Moon,
   Pipette, PaintBucket, Square, Circle, Minus, BoxSelect, Image as ImageIcon, Move,
-  MousePointerSquareDashed // ADD THIS ICON FOR SELECTION BRUSH
+  MousePointerSquareDashed
 } from 'lucide-react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -61,6 +62,10 @@ export const WorkspaceLayout: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
+  const [selectionBox, setSelectionBox] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
+  const isSelecting = useRef(false);
+  const selectionStart = useRef<{ x: number, y: number } | null>(null);
+
   const [inspectorOpen, setInspectorOpen] = useState(window.innerWidth > 1024);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
 
@@ -101,7 +106,7 @@ export const WorkspaceLayout: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [fileMenuOpen]);
-    
+
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       setIsAltPressed(e.altKey);
@@ -133,9 +138,7 @@ export const WorkspaceLayout: React.FC = () => {
     }
   };
 
-    useGSAP(() => {
-    // FIX: Animate the entire toolbar container instead of individual buttons
-    // to prevent clashing with Tailwind's transition-all utility.
+  useGSAP(() => {
     gsap.from('.gsap-toolbar', {
       x: -20,
       opacity: 0,
@@ -180,7 +183,7 @@ export const WorkspaceLayout: React.FC = () => {
   }, [projectConfig.width, projectConfig.height]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+      const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
       if (e.code === 'Space' && useCanvasStore.getState().workspace === 'PAINTING' && useCanvasStore.getState().tool !== 'PAN') {
@@ -192,6 +195,17 @@ export const WorkspaceLayout: React.FC = () => {
       const state = useCanvasStore.getState();
       const ws = state.workspace;
       const key = e.key.toLowerCase();
+
+      // --- START OF STEP B: FULLSCREEN SHORTCUT ---
+      if (key === 'f11' || (e.ctrlKey && e.metaKey && key === 'f')) {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(err => console.warn('Fullscreen denied:', err));
+        } else {
+          document.exitFullscreen().catch(err => console.warn('Exit fullscreen denied:', err));
+        }
+      }
+      // --- END OF STEP B ---
       
       if (ws === 'PAINTING') {
         if (key === 'b' || key === 'p') state.setTool('BRUSH');
@@ -319,11 +333,10 @@ export const WorkspaceLayout: React.FC = () => {
 
   const [isResizingBrushActive, setIsResizingBrushActive] = useState(false);
   const brushResizeStart = useRef<{ startX: number, startSize: number } | null>(null);
-
+  
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 
-    // 1. Scrubby Brush Size (Ctrl + Alt + Drag)
     if (e.ctrlKey && e.altKey && workspace === 'PAINTING') {
       e.preventDefault();
       setIsResizingBrushActive(true);
@@ -332,7 +345,6 @@ export const WorkspaceLayout: React.FC = () => {
       return;
     }
 
-    // 2. ZOOM Logic: Triggered by Ctrl/Meta + Drag when in PAN tool
     if (tool === 'PAN' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       setIsZoomingActive(true);
@@ -353,7 +365,6 @@ export const WorkspaceLayout: React.FC = () => {
       return;
     }
 
-    // 2. PAN Logic: Triggered by Pan Tool OR Middle Click OR Right Click (Pen Barrel Button)
     if (tool === 'PAN' || e.button === 1 || e.button === 2) { 
       e.preventDefault(); 
       setIsPanningActive(true);
@@ -366,8 +377,21 @@ export const WorkspaceLayout: React.FC = () => {
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
+
     
-    // 3. Paint/Draw
+    if (tool === 'SELECT_2D' && workspace === 'PAINTING') {
+      isSelecting.current = true;
+      const rect = canvasWrapperRef.current?.getBoundingClientRect();
+      if (rect) {
+        // Calculate exact canvas coordinates relative to zoom
+        const canvasX = (e.clientX - rect.left) / zoom;
+        const canvasY = (e.clientY - rect.top) / zoom;
+        selectionStart.current = { x: canvasX, y: canvasY };
+        setSelectionBox({ x: canvasX, y: canvasY, w: 0, h: 0 });
+      }
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    
     InputInterceptor.handlePointerDown(e, workspace, tool, projectConfig.width, projectConfig.height);
   };
   
@@ -399,6 +423,24 @@ export const WorkspaceLayout: React.FC = () => {
       return;
     }
     
+    if (isSelecting.current && selectionStart.current && tool === 'SELECT_2D') {
+      const rect = canvasWrapperRef.current?.getBoundingClientRect();
+      if (rect) {
+        const canvasX = (e.clientX - rect.left) / zoom;
+        const canvasY = (e.clientY - rect.top) / zoom;
+        const startX = selectionStart.current.x;
+        const startY = selectionStart.current.y;
+        
+        // Draw the box originating from the start coordinates
+        setSelectionBox({
+          x: Math.min(startX, canvasX),
+          y: Math.min(startY, canvasY),
+          w: Math.abs(canvasX - startX),
+          h: Math.abs(canvasY - startY)
+        });
+      }
+    }
+    
     InputInterceptor.handlePointerMove(e, workspace, tool, projectConfig.width, projectConfig.height);
   };
   
@@ -415,6 +457,13 @@ export const WorkspaceLayout: React.FC = () => {
       panStart.current = null;
       if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
       return;
+    }
+    
+    if (isSelecting.current) {
+      isSelecting.current = false;
+      selectionStart.current = null;
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      // We purposefully DO NOT clear selectionBox here so the user sees their active selection
     }
     
     InputInterceptor.handlePointerUp(e, workspace, tool);
@@ -438,15 +487,13 @@ export const WorkspaceLayout: React.FC = () => {
     <div 
       ref={layoutRef} 
       className="w-full h-[100dvh] bg-bg-app text-text-primary flex flex-col font-sans overflow-hidden"
-      onContextMenu={(e) => e.preventDefault()} /* <--- ADD THIS HERE */
+      onContextMenu={(e) => e.preventDefault()}
     > 
       <BrushCursorOverlay />
 
-      {/* TOP NAVIGATION BAR */}
       <div className="gsap-topbar h-14 bg-bg-panel/95 backdrop-blur-md border-b border-border-subtle flex items-center px-4 sm:px-6 justify-between select-none z-30 shadow-sm">
         <div className="flex items-center gap-4 sm:gap-6 w-full">
           
-          {/* Logo Area */}
           <div className="font-display font-medium tracking-wide uppercase text-sm flex items-center gap-3 text-text-primary">
             <div className="relative">
               <img src="/marisopa.png" alt="Veil Studio Logo" className="w-7 h-7 object-contain relative z-10" />
@@ -464,7 +511,6 @@ export const WorkspaceLayout: React.FC = () => {
             </span>
           </div>
 
-          {/* File Menu */}
           <div className="relative file-menu-container flex items-center h-full">
             <button 
               className={`text-[11px] font-medium tracking-wide px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${fileMenuOpen ? 'bg-bg-active text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'}`}
@@ -475,7 +521,6 @@ export const WorkspaceLayout: React.FC = () => {
             <input type="file" accept=".json" ref={fileInputRef} onChange={handleImportProject} className="hidden" />
             <input type="file" accept="image/png, image/jpeg, image/jpg" ref={imageInputRef} onChange={handleImageImport} className="hidden" />
             
-            {/* Dropdown with Glassmorphism */}
             {fileMenuOpen && (
               <div className="absolute top-12 left-0 w-56 glass-panel rounded-xl py-1.5 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
                 <button onClick={async () => {
@@ -516,9 +561,8 @@ export const WorkspaceLayout: React.FC = () => {
             )}
           </div>
           
-          <div className="flex-1"></div> {/* Spacer */}
+          <div className="flex-1"></div> 
           
-        {/* Segmented Control for Workspaces */}
           <div className="flex bg-bg-input p-1 rounded-lg border border-border-subtle relative">
             <button 
               className={`flex-1 relative px-4 sm:px-6 py-1.5 rounded-md text-[11px] font-semibold tracking-wide transition-all duration-300 z-10 ${
@@ -536,14 +580,12 @@ export const WorkspaceLayout: React.FC = () => {
             >
               Painting
             </button>
-            {/* Sliding background pill */}
             <div 
               className="absolute left-1 top-1 bottom-1 w-[calc(50%-4px)] bg-bg-panel shadow-sm border border-border-subtle rounded-md transition-transform duration-300 ease-out z-0"
               style={{ transform: workspace === 'PAINTING' ? 'translateX(100%)' : 'translateX(0%)' }}
             />
           </div>
           
-          {/* Action Icons */}
           <div className="flex gap-2 ml-2">
             <button onClick={toggleTheme} className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-hover transition-all duration-200" title="Toggle Theme">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
@@ -557,7 +599,6 @@ export const WorkspaceLayout: React.FC = () => {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-          {/* FLOATING LEFT TOOLBAR */}
          <div className="gsap-toolbar w-14 my-4 ml-4 glass-panel rounded-2xl flex flex-col items-center py-4 gap-3 z-20 absolute left-0 top-14 bottom-4 overflow-y-auto custom-scrollbar">
           <div className="flex flex-col gap-2 w-full px-2">
             
@@ -621,16 +662,18 @@ export const WorkspaceLayout: React.FC = () => {
           
           {isSpritesheetMode && <AnimationPreview />}
 
-        <div 
+          <div 
             ref={viewportRef}
-            className="flex-1 overflow-hidden relative select-none z-0 touch-none" /* <-- Added touch-none here */
+            className="flex-1 overflow-hidden relative select-none z-0 touch-none bg-bg-app"
             style={{
-              /* Adaptive grid using CSS variables */
               backgroundImage: `radial-gradient(var(--color-border-strong) 1px, transparent 1px)`,
               backgroundSize: `40px 40px`,
               backgroundPosition: `${pan.x % 40}px ${pan.y % 40}px`
             }}
           >
+            {/* Rulers successfully injected here without breaking layout! */}
+            {workspace === 'PAINTING' && <CanvasRulers />}
+
             <div 
               ref={canvasWrapperRef}
               style={{ 
@@ -671,6 +714,43 @@ export const WorkspaceLayout: React.FC = () => {
                   </div>
                 )}
 
+                <style>{`
+                  @keyframes marching-ants {
+                    to { stroke-dashoffset: -10; }
+                  }
+                  .marching-ants-path {
+                    animation: marching-ants 0.4s linear infinite;
+                  }
+                `}</style>
+
+                {tool === 'SELECT_2D' && selectionBox && (
+                  <svg 
+                    className="absolute z-30 pointer-events-none"
+                    style={{
+                      left: selectionBox.x,
+                      top: selectionBox.y,
+                      width: selectionBox.w,
+                      height: selectionBox.h,
+                      overflow: 'visible'
+                    }}
+                  >
+                    {/* Dark background stroke for visibility on light canvases */}
+                    <rect 
+                      x="0" y="0" width="100%" height="100%" 
+                      fill="rgba(59, 130, 246, 0.1)" 
+                      stroke="#000000" strokeWidth="1" 
+                    />
+                    {/* Moving white dashed stroke */}
+                    <rect 
+                      x="0" y="0" width="100%" height="100%" 
+                      fill="none" 
+                      stroke="#ffffff" strokeWidth="1" 
+                      strokeDasharray="5,5" 
+                      className="marching-ants-path"
+                    />
+                  </svg>
+                )}
+
                 <div 
                   ref={interceptContainerRef}
                   className="absolute inset-0 z-40 touch-none"
@@ -691,7 +771,6 @@ export const WorkspaceLayout: React.FC = () => {
 
         </div>
   
-        {/* RIGHT INSPECTOR PANEL */}
         <div className={`
           absolute lg:relative right-0 top-0 bottom-0 z-40 
           transform transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]
@@ -703,7 +782,6 @@ export const WorkspaceLayout: React.FC = () => {
           </div>
         </div>
         
-        {/* Mobile Overlay */}
         <div 
           className={`fixed inset-0 bg-black/50 backdrop-blur-sm z-30 lg:hidden transition-opacity duration-300 ${inspectorOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
           onClick={() => setInspectorOpen(false)}

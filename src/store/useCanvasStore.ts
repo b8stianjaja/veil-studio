@@ -34,6 +34,10 @@ interface CanvasState {
   symmetryY: boolean;
   showGrid: boolean;
   
+  // --- NEW: Rulers & Guidelines ---
+  showRulers: boolean;
+  guides: { id: string, axis: 'x' | 'y', position: number }[];
+  
   referenceGrid: { show: boolean; rows: number; cols: number; color: string; opacity: number; };
   autoSaveStatus: 'saved' | 'saving' | 'dirty';
   projectConfig: { width: number, height: number };
@@ -42,6 +46,12 @@ interface CanvasState {
   zoom: number;
   pan: { x: number, y: number };
   activeLayerBounds: { x: number, y: number, w: number, h: number } | null;
+  
+  // Actions
+  setShowRulers: (show: boolean) => void;
+  addGuide: (axis: 'x' | 'y', position: number) => void;
+  removeGuide: (id: string) => void;
+  clearGuides: () => void;
   
   setAutoSaveStatus: (status: 'saved' | 'saving' | 'dirty') => void;
   setActiveLayerBounds: (bounds: { x: number, y: number, w: number, h: number } | null) => void;
@@ -91,6 +101,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   symmetryX: false,
   symmetryY: false,
   showGrid: false,
+  
+  // --- NEW: Rulers & Guidelines Initial State ---
+  showRulers: true,
+  guides: [],
+
   referenceGrid: { show: false, rows: 4, cols: 4, color: '#00ffff', opacity: 0.5 },
   autoSaveStatus: 'saved',
   projectConfigured: false,
@@ -99,6 +114,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   zoom: 1,
   pan: { x: 0, y: 0 },
   activeLayerBounds: null,
+
+  // --- NEW: Rulers & Guidelines Actions ---
+  setShowRulers: (show) => set({ showRulers: show }),
+  addGuide: (axis, position) => set(state => ({ guides: [...state.guides, { id: crypto.randomUUID(), axis, position }] })),
+  removeGuide: (id) => set(state => ({ guides: state.guides.filter(g => g.id !== id) })),
+  clearGuides: () => set({ guides: [] }),
 
   setAutoSaveStatus: (status) => set({ autoSaveStatus: status }),
   setActiveLayerBounds: (bounds) => set({ activeLayerBounds: bounds }),
